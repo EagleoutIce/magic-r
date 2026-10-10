@@ -129,6 +129,17 @@ test('each scope is analyzed as a program of its own', async() => {
 	assert.match(out, /\\mrFlowBlocks\{1,3,2\}/);
 });
 
+test('a playground link starts with the packages of mrlibrary', () => {
+	const code = (lib, body) => `## magic-r request {"kind":"playground", "name":"pg-1", "block":"1", "marks":["2@x"], "library":${lib}}\n## magic-r block 1\n${body}`;
+	const decode = t => {
+		const m = /\\mrFlowrPlayground\{pg-1\}\{c=t([^&}]*)(?:&h=([^}]*))?\}/.exec(t);
+		return [Buffer.from(m[1], 'base64url').toString(), m[2]];
+	};
+	assert.deepEqual(decode(m.playgroundTexts(code('["dplyr"]', 'y <- 1\nx <- y'))[0]), ['library(dplyr)\ny <- 1\nx <- y', '3@x']);
+	assert.deepEqual(decode(m.playgroundTexts(code('["dplyr"]', 'library(dplyr)\nx <- 1'))[0])[0], 'library(dplyr)\nx <- 1');
+	assert.deepEqual(decode(m.playgroundTexts(code('[]', 'y <- 1\nx <- y'))[0]), ['y <- 1\nx <- y', '2@x']);
+});
+
 test('the plain scan finds loads', () => {
 	const { entries } = m.detectByScan(m.parseCode([
 		'## magic-r block 1', 'library(dplyr); require("tidyr") # library(no)',

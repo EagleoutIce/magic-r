@@ -696,6 +696,12 @@
 \lst@AddToHookAtTop{SelectCharTable}{\ifmr@active\mr@nobreaks\fi}
 \lst@AddToHook{SelectCharTable}{\ifmr@active\mr@breaks\fi}
 \lst@Key{attach}\relax{\mrAttach{#1}}
+% the key mrlibrary={pkg,...}: the listing runs as if it started with library(pkg) for each, which it does
+% not show: its names link into these packages, and its playground code starts with these calls
+\lst@Key{mrlibrary}{}{\def\mr@libs{#1}}
+\lst@AddToHook{Init}{\ifmr@active\ifx\mr@libs\@empty\else
+  \global\let\mr@libs@path\mr@path\expandafter\mrAttach\expandafter{\mr@libs}\fi\fi}
+\lst@AddToHook{DeInit}{\ifmr@active\ifx\mr@libs\@empty\else\global\let\mr@path\mr@libs@path\fi\fi}
 \def\mrLinksOn{\mr@linkstrue}          \def\mrLinksOff{\mr@linksfalse}
 \def\mrLocalLinksOn{\mr@locallinkstrue} \def\mrLocalLinksOff{\mr@locallinksfalse}
 % the keys mrlinks and mrlocallinks: no links at all in a listing, or none to the definitions of the
@@ -1574,6 +1580,7 @@
 % marked, and a finding of the linter opens it with the finding marked
 \tl_new:N \l__mr_play_tl
 \clist_new:N \l__mr_marks_clist
+\clist_new:N \l__mr_libs_clist
 \lst@Key { mrplayground } { } [ true ] { \tl_set:Nn \l__mr_play_tl {#1} }
 \lst@AddToHook { Init }
   {
@@ -1584,11 +1591,13 @@
         \legacy_if:nT { mr@play }
           {
             \clist_set:Ne \l__mr_marks_clist { \l__mr_slice_tl , \l__mr_arrows_tl }
+            \clist_set:Ne \l__mr_libs_clist { \mr@libs }
             \__mr_side_open:Nnn \g__mr_play_iow { play } { \c_true_bool }
             \__mr_request:nnnn { playground } { pg- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
               {
                 , ~ "file":" \c_sys_jobname_str .mr-play.R", ~ "part":" \int_use:N \mr@lstid ",
                 ~ "marks": \__mr_json_list:N \l__mr_marks_clist
+                \clist_if_empty:NF \l__mr_libs_clist { , ~ "library": \__mr_json_list:N \l__mr_libs_clist }
               }
           }
       }

@@ -1705,7 +1705,14 @@ export function playgroundTexts(code) {
 		const b = blockOf(blocks, r.block);
 		const lines = sideLines(r) ?? b?.lines;
 		const marks = [].concat(r.marks ?? []).map(c => criterion(c, lines ?? [])).filter(c => /^\d+(:\d+|@.+)?$/.test(c));
-		return lines ? [`\\mrFlowrPlayground{${r.name}}{${playgroundHash(lines, marks)}}`] : [];
+		if(!lines) {
+			return [];
+		}
+		// the packages the listing attaches without showing it (key mrlibrary) come first, the marks move down
+		const libs = [].concat(r.library ?? []).map(String).filter(p => /^[A-Za-z][A-Za-z0-9.]*$/.test(p))
+			.filter(p => !lines.some(l => new RegExp(`\\b(library|require)\\(\\s*["']?${p.replace(/\./g, '\\.')}["']?\\s*[,)]`).test(l)));
+		const shifted = marks.map(c => c.replace(/^\d+/, n => String(Number(n) + libs.length)));
+		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...libs.map(p => `library(${p})`), ...lines], shifted)}}`];
 	});
 }
 
