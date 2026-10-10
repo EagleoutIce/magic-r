@@ -1,0 +1,10 @@
+% The option operators links operators and keywords to R's help.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off,operators]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{operators and keywords}{\Typeset{\bmr{if (a == TRUE) b <- x |> base::sum() && NA else NULL}}}
+\END

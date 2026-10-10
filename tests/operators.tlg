@@ -1,0 +1,22 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: operators and keywords
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Control.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Comparison.html
+COPY: ==
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/logical.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/assignOps.html
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/pipeOp.html
+COPY: |>
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/00Index.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/ns-dblcolon.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Logic.html
+COPY: &&
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/NA.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Control.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/NULL.html
+============================================================

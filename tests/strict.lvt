@@ -1,0 +1,11 @@
+% With 'strict', only attached packages link.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off,strict]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{not attached}{\mrLoadPackage{dplyr}\Typeset{\bmr{mutate}}}
+\TEST{attached}{\mrAttach{dplyr}\Typeset{\bmr{mutate}}}
+\END

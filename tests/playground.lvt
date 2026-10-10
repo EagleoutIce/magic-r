@@ -1,0 +1,26 @@
+% flowR's playground: a listing links to it, a finding of the linter links to it with the finding
+% marked and its rule to flowR's wiki, a listing can opt out. A graph from a fixture typesets with
+% and without a legend.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,playground]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\renewcommand\href[2]{\typeout{LINK: \detokenize{#1}}#2}
+\START
+\setbox0\vbox{%
+\begin{mr}[mrlint]
+setwd("/tmp")
+\end{mr}
+\TYPE{---- no button}
+\begin{mr}[mrplayground=false]
+x <- 1
+\end{mr}
+}
+\TEST{graphs}{%
+  \setbox0\hbox{\mrDataflowGraph{g}}\setbox2\hbox{\mrDataflowGraph[legend,scale=2]{g}}%
+  \TYPE{A LEGEND ADDS HEIGHT: \ifdim\ht2>\ht0 yes\else no\fi}}
+\END

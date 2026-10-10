@@ -1,0 +1,72 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: search path
+============================================================
+PATH: {stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+============================================================
+============================================================
+TEST 2: stats first
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/filter.html
+============================================================
+============================================================
+TEST: library
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/filter.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://cran.r-project.org/package=dplyr
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+============================================================
+TEST 3: attached
+============================================================
+PATH: {dplyr}{stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+LINK: https://rdrr.io/cran/dplyr/man/mutate.html
+============================================================
+============================================================
+TEST 4: detach
+============================================================
+PATH: {stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/filter.html
+============================================================
+============================================================
+TEST 5: attach
+============================================================
+PATH: {dplyr}{stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+============================================================
+============================================================
+TEST 6: listing key
+============================================================
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+============================================================
+============================================================
+TEST 7: require
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/require.html
+LINK: https://cran.r-project.org/package=magrittr
+LINK: https://rdrr.io/cran/magrittr/man/pipe.html
+============================================================
+============================================================
+TEST 8: not attached
+============================================================
+LINK: https://rdrr.io/cran/dplyr/man/mutate.html
+============================================================
+============================================================
+TEST 9: unknown package
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+============================================================
+============================================================
+TEST 10: search path set
+============================================================
+PATH: {utils}{base}
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/filter.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/utils/html/head.html
+============================================================
+============================================================
+TEST 11: version
+============================================================
+1.2.1 .
+============================================================

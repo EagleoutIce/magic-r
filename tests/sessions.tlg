@@ -1,0 +1,23 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: session
+\g__mr_iow=\write...
+SESSION: :prompt:x <- c(1, 5, 3)
+SESSION: :prompt:f <- function(v) {
+SESSION: :cont:  v * 2
+SESSION: :cont:}
+SESSION: :prompt:f(x)
+SESSION: :out:[1]  2 10  6
+SESSION: :prompt:message("hi"); warning("w"); stop("no")
+SESSION: :out:hi
+SESSION: :out:Warning: w
+SESSION: :out:Error: no
+============================================================
+TEST: own environment
+SESSION: :prompt:exists("x")
+SESSION: :out:[1] FALSE
+============================================================
+TEST: incomplete
+SESSION: :prompt:(1 +
+SESSION: :out:Error: incomplete input

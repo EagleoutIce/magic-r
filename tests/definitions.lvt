@@ -1,0 +1,61 @@
+% Names defined in the document link to their definition.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{definitions}
+\begin{mr}
+sq <- function(v) v^2
+twice = \(x) 2 * x
+total <<- 0
+mean <- 1
+helper <- function(x) {
+  inner <- x + 1
+  sq(inner)
+}
+x <- sq(2) + twice(mean) + total
+\end{mr}
+\EndBox
+\TEST{uses}{\Typeset{\bmr{sq(1) twice total mean helper inner}}}
+\TEST{use before the definition}{\Typeset{\bmr{later}}}
+\BeginBox{a second definition}
+\begin{mr}
+sq <- 4
+later <- sq
+\end{mr}
+\EndBox
+\TEST{the last definition before}{\Typeset{\bmr{sq later}}}
+\TEST{inline code defines nothing}{\Typeset{\bmr{inline <- 1}}\Typeset{\bmr{inline}}}
+\BeginBox{switched off}
+\begin{mr}[mrdefinitions=false]
+nothing <- 1
+\end{mr}
+\EndBox
+\TEST{not defined}{\Typeset{\bmr{nothing}}}
+\BeginBox{local listing}
+\begin{mr}[mrdefinitions=local]
+private <- 1
+private
+\end{mr}
+\EndBox
+\TEST{local listing}{\Typeset{\bmr{private}}}
+\BeginBox{comments and strings define nothing}
+\begin{mr}
+# commented <- 1
+"string" <- 2
+cmt # <- no
+\end{mr}
+\EndBox
+\TEST{nothing defined}{\Typeset{\bmr{commented string cmt}}}
+\BeginBox{no assignment}
+\begin{mr}
+y == 2
+z(a = 1)
+\end{mr}
+\EndBox
+\TEST{nothing defined either}{\Typeset{\bmr{y z}}}
+\END

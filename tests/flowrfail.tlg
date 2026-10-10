@@ -1,0 +1,21 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: failure
+============================================================
+Package magic-r Warning: flowR could not help: node: not flowR; web: fetch failed. The links come from the shipped database.
+============================================================
+============================================================
+TEST 2: success
+============================================================
+============================================================
+============================================================
+TEST 3: a listing flowR could not parse
+============================================================
+Package magic-r Info: flowR cannot parse listing 3, its loads are unknown.
+============================================================
+============================================================
+TEST 4: still linked
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+============================================================

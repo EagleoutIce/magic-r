@@ -1,0 +1,25 @@
+% Indices without flowR: each use of a symbol, or the versions of a variable
+% (a definition is read from the next line on), and \mrUse refers to them.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{usage}
+\begin{mr}[mrindex,mrname=u]
+x <- c(1)
+x <- x + mean(x)
+\end{mr}
+\EndBox
+\BeginBox{ssa}
+\begin{mr}[mrindex=ssa,mrname=s]
+x <- c(1)
+x <- x + mean(x)
+print(x)
+\end{mr}
+\EndBox
+\TEST{references}{\Typeset{\mrUse[u]{x}{3}\mrUse[s]{x}{2}\mrUseAt[u]{2@mean}\mrUseAt[s]{3:7}\mrUseAt{2@[3]x}\mrUse{x}{1}}}
+\END

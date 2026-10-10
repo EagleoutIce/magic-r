@@ -1,0 +1,55 @@
+
+@@mr:1@@
+5.5
+@@mr-stat:5:ok@@
+
+@@mr:2@@
+1.414
+@@mr-stat:0:ok@@
+
+@@mr:3@@
+1, 2, 3
+@@mr-stat:0:ok@@
+
+@@mr:4@@
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   1.00    1.25    1.50    1.50    1.75    2.00 
+@@mr-stat:1:ok@@
+
+@@mr:5@@
+Error: object 'nope' not found
+@@mr-stat:1:error@@
+
+@@mr:6@@
+Warning: NAs introduced by coercion
+[1] NA
+@@mr-stat:0:ok@@
+
+@@mr:7@@
+5
+@@mr-stat:1:ok@@
+
+@@mr:8@@
+2
+@@mr-stat:0:ok@@
+
+@@mr:9@@
+42
+@@mr-stat:0:ok@@
+
+@@mr:10@@
+50%
+@@mr-stat:0:ok@@
+
+@@mr:11@@
+55
+@@mr-stat:0:ok@@
+
+@@mr:12@@
+FALSE
+@@mr-stat:0:ok@@
+
+@@mr:13@@
+@@mr-load: 2:0: unexpected end of input 1: x <- ^
+1
+@@mr-stat:0:ok@@

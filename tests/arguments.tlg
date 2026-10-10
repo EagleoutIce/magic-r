@@ -1,0 +1,36 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: named arguments
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+============================================================
+============================================================
+TEST 2: comparison
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+COPY: ==
+============================================================
+============================================================
+TEST 3: assignment
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+============================================================
+============================================================
+TEST 4: nested
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/median.html
+============================================================
+============================================================
+TEST 5: parameters
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+============================================================
+============================================================
+TEST: over lines
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html

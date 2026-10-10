@@ -1,0 +1,27 @@
+% Packages attach as in R: the last one attached is searched first.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{search path}{\ShowPath}
+\TEST{stats first}{\Typeset{\bmr{filter}}}
+\BeginBox{library}
+\begin{mr}
+filter(x)
+library(dplyr)
+filter(x)
+\end{mr}
+\EndBox
+\TEST{attached}{\ShowPath\Typeset{\bmr{filter mutate}}}
+\TEST{detach}{\mrDetach{dplyr}\ShowPath\Typeset{\bmr{filter}}}
+\TEST{attach}{\mrAttach{dplyr}\ShowPath\Typeset{\bmr{filter}}\mrDetach{dplyr}}
+\TEST{listing key}{\Typeset{\bmr[attach=dplyr]{filter}}\Typeset{\bmr{filter}}\mrDetach{dplyr}}
+\TEST{require}{\Typeset{\bmr{require(magrittr); x \%>\% y}}\mrDetach{magrittr}}
+\TEST{not attached}{\Typeset{\bmr{mutate}}}
+\TEST{unknown package}{\Typeset{\bmr{library(nothing); nothing::x}}\mrDetach{nothing}}
+\TEST{search path set}{\mrSearchPath{base,utils}\ShowPath\Typeset{\bmr{filter head}}}
+\TEST{version}{\TYPE{\mrVersion{dplyr} \mrVersion{nothing}.}}
+\END

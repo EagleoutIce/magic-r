@@ -1,0 +1,30 @@
+\documentclass{beamer}
+\usepackage[T1]{fontenc}
+\usepackage[varqu,varl]{inconsolata}
+\usepackage[eval]{magic-r}
+\setbeamertemplate{navigation symbols}{}
+\begin{document}
+\begin{frame}[fragile]{Definitions across overlays}
+\begin{mr}
+normalize <- function(x) {
+  (x - mean(x)) / sd(x)
+}
+\end{mr}
+\pause
+\bmr{normalize(rnorm(10))} links to its definition, on every overlay.
+\end{frame}
+\begin{frame}[fragile]{An animated session}
+\begin{rsession}
+x <- rnorm(100, mean = 5)
+round(mean(x))
+range(round(x)) |> diff()
+\end{rsession}
+\end{frame}
+\begin{frame}[fragile]{flowR finds the packages}
+\begin{mr}
+pkgs <- c("tidyr", "purrr")
+for (p in pkgs) library(p, character.only = TRUE)
+pivot_longer(df, cols = -id) |> map(nrow)
+\end{mr}
+\end{frame}
+\end{document}

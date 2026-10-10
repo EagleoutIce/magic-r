@@ -1,0 +1,22 @@
+% Named arguments do not link (the last run found them).
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{named arguments}{\Typeset{\bmr{paste(sum = 1, mean, c = c(2))}}}
+\TEST{comparison}{\Typeset{\bmr{f(sum == 1)}}}
+\TEST{assignment}{\Typeset{\bmr{sum = 1}}}
+\TEST{nested}{\Typeset{\bmr{f(g(x), mean = median(y), sd= 2)}}}
+\TEST{parameters}{\Typeset{\bmr{function(sum, n = mean, c) sum; \\(paste) paste}}}
+\BeginBox{over lines}
+\begin{mr}
+paste(
+  sum = 1,
+  mean
+)
+\end{mr}
+\EndBox
+\END

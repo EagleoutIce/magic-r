@@ -1,0 +1,812 @@
+\documentclass[10pt,DIV=12]{scrartcl}
+\usepackage[T1]{fontenc}
+\usepackage{newpxtext,newpxmath}
+\usepackage[varqu,varl,scale=.95]{inconsolata}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage{csquotes}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage[group-separator={\,},group-minimum-digits=4]{siunitx}
+\usepackage[margin=2cm]{geometry}
+\usepackage{microtype}
+\DisableLigatures[<,>,-]{encoding=T1,family=tt*}% '<<-' is no guillemet
+\usepackage{imakeidx}
+\makeindex[title={Index of Commands, Options, and Keys},name=\jobname,columns=2,columnsep=.75cm,noautomatic=true,intoc]
+% the index without latexmk or l3build: makeindex runs at the end, in the output directory
+\ExplSyntaxOn
+\AddToHook{enddocument/end}
+  {
+    \sys_if_shell_unrestricted:T
+      {
+        \sys_shell_now:e
+          {
+            cd~"\c_dollar_str\c_left_brace_str TEXMF_OUTPUT_DIRECTORY:-.\c_right_brace_str"~&&~
+            makeindex~-q~\c_sys_jobname_str .idx
+          }
+      }
+  }
+\ExplSyntaxOff
+\indexsetup{noclearpage}
+
+\usepackage[eval,graphs,playground,interactive,symbols,xlistings={style={plain number}}]{magic-r}
+\definecolor{mrplay}{HTML}{4A7FB5}\mrPlayStyle{filled}
+\LoadLanguages{latex,bash}
+% a calm palette (after Catppuccin Latte) through the colors of xlistings
+\definecolor{plum}{HTML}{9B1B6E}         \definecolor{latte-blue}{HTML}{1E66F5}
+\definecolor{latte-green}{HTML}{40A02B}  \definecolor{latte-text}{HTML}{4C4F69}
+\definecolor{latte-subtle}{HTML}{9CA0B0} \definecolor{latte-peach}{HTML}{DF8E1D}
+\lstcolorlet{keywordA}{plum}             % keywords
+\lstcolorlet{keywordB}{latte-blue}       % packages
+\lstcolorlet{keywordC}{latte-text}       % functions, marked by their links
+\lstcolorlet{numbers}{latte-blue}
+\lstcolorlet{literals}{latte-green}
+\lstcolorlet{comments}{latte-subtle}
+\lstcolorlet{command}{plum}              % LaTeX macros
+% the commands of magic-r get their color where they link (\doc@link), the environments here
+\xlstlangoverride{latex}{morekeywords=[5]{mr,rsession,mrfile,magic-r},
+  alsoletter={\\\#@-},escapeinside={}{},deletedelim=[is]{|plain|}{|plain|}}
+
+\usepackage[colorlinks,allcolors=cyan!65!black]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+\let\TT\texttt
+\NewDocumentCommand\idxkind{m}{\textcolor{gray}{\small(#1)}}
+% R's short lambda, built from its characters: a literal backslash and parenthesis would make editors
+% see the start of math
+\makeatletter\edef\doclambda{f <- \@backslashchar(x)}\makeatother
+% names in the LaTeX listings link to where the text explains them: a name
+% registers its target in the aux file, so that code before the explanation links too
+\makeatletter
+\def\doc@target#1{\ifcsname doc@placed@#1\endcsname\else\csgdef{doc@placed@#1}{}%
+  \raisebox{\ht\strutbox}{\hypertarget{doc.#1}{}}\fi}
+\def\doc@register#1#2{\immediate\write\@auxout{\string\docname{#1}{#2}}}
+\newcommand\docname[2]{\csgdef{doc@name@#1}{#2}}
+\newcommand\doccmdname[2]{\csgdef{doc@name@\@backslashchar#1}{#2}}
+% a command always links, another name (of a key, an option, an environment) only in brackets or
+% right after '{', not in a string and not after '/' (a path)
+\ExplSyntaxOn
+\int_new:N \g__doc_brackets_int
+\bool_new:N \g__doc_quote_bool
+\bool_new:N \g__doc_path_bool
+\bool_new:N \g__doc_brace_bool
+\lst@AddToHook { Init }
+  { \int_gzero:N \g__doc_brackets_int \bool_gset_false:N \g__doc_quote_bool }
+\lst@AddToHook { OutputOther }
+  {
+    \legacy_if:nF { mr@active }
+      {
+        \str_set:Ne \l_tmpa_str { \exp_args:No \tl_to_str:n { \the \lst@token } }
+        \str_map_inline:Nn \l_tmpa_str
+          {
+            \str_case:nn {##1}
+              {
+                { [ } { \int_gincr:N \g__doc_brackets_int }
+                { ] } { \int_compare:nNnT \g__doc_brackets_int > 0 { \int_gdecr:N \g__doc_brackets_int } }
+                { " } { \bool_gset_inverse:N \g__doc_quote_bool }
+              }
+          }
+        \str_set:Ne \l_tmpb_str { \str_item:Nn \l_tmpa_str { \str_count:N \l_tmpa_str } }
+        \str_if_eq:eeT { \l_tmpb_str } { \c_space_tl } { \str_set:Ne \l_tmpb_str { \str_item:Nn \l_tmpa_str { \str_count:N \l_tmpa_str - 1 } } }
+        \bool_gset:Nn \g__doc_path_bool { \str_if_eq_p:ee { \l_tmpb_str } { / } }
+        \bool_gset:Nn \g__doc_brace_bool { \str_if_eq_p:ee { \l_tmpb_str } { \c_left_brace_str } }
+      }
+  }
+\lst@AddToHook { Output }
+  {
+    \legacy_if:nF { mr@active }
+      {
+        \mr@tokenname
+        \cs_if_exist:cT { doc@name@ \mr@token }
+          {
+            \bool_lazy_or:nnT
+              { \str_if_eq_p:ee { \str_head:N \mr@token } { \c_backslash_str } }
+              {
+                \bool_lazy_and_p:nn
+                  { \bool_lazy_or_p:nn { \int_compare_p:nNn \g__doc_brackets_int > 0 } { \g__doc_brace_bool } }
+                  { ! \g__doc_quote_bool && ! \g__doc_path_bool }
+              }
+              { \let \doc@style \lst@thestyle \let \lst@thestyle \doc@link }
+          }
+        \bool_gset_false:N \g__doc_path_bool
+        \bool_gset_false:N \g__doc_brace_bool
+      }
+  }
+\ExplSyntaxOff
+% a link keeps the color of the code: hyperref's color of links does not reach it
+% keys of magic-r are gray, as the keys of listings
+\colorlet{doc@key}{gray!75!black}
+\def\doc@link#1{\colorlet{mr@plain}{.}\edef\doc@t{\csname doc@name@\mr@token\endcsname}%
+  \edef\doc@x{\noexpand\in@{key.}{\doc@t}}\doc@x
+  \ifin@\colorlet{mr@plain}{doc@key}\let\doc@style\@firstofone\fi
+  \edef\doc@x{\noexpand\in@{cmd.}{\doc@t}}\doc@x
+  \ifin@\colorlet{mr@plain}{plum}\let\doc@style\@firstofone\fi
+  \hyperlink{doc.\doc@t}{\mr@underline{\color{mr@plain}\doc@style{#1}}}}
+% the optional argument says what a name needs (flowr, r), its entry in the index shows the badge
+\def\doc@needs#1{\ifx\relax#1\relax\else\protect\,\string\needs#1\fi}% written as is
+\NewDocumentCommand\cmd{O{}m}{\doc@target{cmd.#2}\immediate\write\@auxout{\string\doccmdname{#2}{cmd.#2}}%
+  \TT{\color{plum}\textbackslash#2}\index{#2@\texttt{\color{plum}\textbackslash #2}\doc@needs{#1}\string|hyperpage}}
+\NewDocumentCommand\key{O{}m}{\doc@target{key.#2}\doc@register{#2}{key.#2}%
+  \TT{#2}\index{#2@\texttt{#2} \idxkind{key}\doc@needs{#1}\string|hyperpage}}
+\NewDocumentCommand\env{O{}m}{\doc@target{env.#2}\doc@register{#2}{env.#2}%
+  \TT{#2}\index{#2@\texttt{#2} \idxkind{environment}\doc@needs{#1}\string|hyperpage}}
+\NewDocumentCommand\option{O{}mm}{\doc@target{opt.#2}\doc@register{#2}{opt.#2}\TT{\bfseries\color{plum}#2}%
+  \index{#2@\texttt{\bfseries\color{plum}#2} \idxkind{package option}\doc@needs{#1}\string|hyperpage}\,%
+  \textcolor{gray}{\small(\ifx\relax#3\relax no default\else default \TT{#3}\fi)}}
+\makeatother
+% \begin{mrdemo}[options] R code \end{mrdemo}: the LaTeX that writes a listing (with the
+% background of xlistings), then the listing it gives (plain number)
+\makeatletter
+\newwrite\demo@body\newwrite\demo@tex\newcount\demo@n
+% the catcodes change before the options are looked for, the options are read again with the usual ones
+% the options keep their braces, so a ']' in braces does not end them
+\newenvironment{mrdemo}{\begingroup\let\do\@makeother\dospecials\catcode`\^^M\active
+  \catcode`\{=1 \catcode`\}=2 \@ifnextchar[\demo@start{\demo@start[]}}
+ {\immediate\write\demo@tex{\string\end\string{mr\string}}\immediate\closeout\demo@body
+  \immediate\closeout\demo@tex\endgroup
+  \lstinputlisting[style=xlst@MAIN,language=lLatex,language addons=latex]{\demo@file.tex}%
+  \demo@label\edef\mr@t{\noexpand\mr@r@input{lMagicR}{\unexpanded\expandafter{\demo@opts}}{\demo@file.R}}\mr@t}
+% a listing with a name (mrname=files) is where the name links to in the LaTeX code of the manual
+\ExplSyntaxOn
+\cs_new_protected:Npn \demo@label
+  {
+    \regex_extract_once:nVNT { mrname=(\w+) } \demo@opts \l_tmpa_seq
+      {
+        % a box of no height between the paragraphs, so the target adds no space
+        \par \nointerlineskip
+        \hbox:n { \exp_args:Ne \doc@target { lst. \seq_item:Nn \l_tmpa_seq { 2 } } }
+        \nointerlineskip
+        \exp_args:Nee \doc@register { \seq_item:Nn \l_tmpa_seq { 2 } } { lst. \seq_item:Nn \l_tmpa_seq { 2 } }
+      }
+  }
+\cs_generate_variant:Nn \regex_extract_once:nnNT { nV }
+\ExplSyntaxOff
+\def\demo@start[#1]{\catcode`\{=12 \catcode`\}=12 \global\advance\demo@n\@ne\xdef\demo@file{\jobname-demo-\the\demo@n}%
+  \demo@rescan{#1}%
+  \immediate\openout\demo@body=\demo@file.R\relax\immediate\openout\demo@tex=\demo@file.tex\relax
+  \immediate\write\demo@tex{\string\begin\string{mr\string}\ifx\relax#1\relax\else[#1]\fi}%
+  \def\verbatim@processline{\immediate\write\demo@body{\the\verbatim@line}%
+    \immediate\write\demo@tex{\the\verbatim@line}}\verbatim@start}
+\ExplSyntaxOn
+\cs_new_protected:Npn \demo@rescan #1
+  {
+    \tl_gset_rescan:Nnn \demo@opts
+      { \char_set_catcode_group_begin:N \{ \char_set_catcode_group_end:N \} \char_set_catcode_escape:N \\ }
+      {#1}
+  }
+\ExplSyntaxOff
+\makeatother
+\newcommand\pkg[1]{\href{\ifcsname pkgurl@#1\endcsname\csname pkgurl@#1\endcsname\else https://ctan.org/pkg/#1\fi}{\TT{#1}}}
+\expandafter\def\csname pkgurl@xlistings\endcsname{https://github.com/EagleoutIce/xlistings}
+\expandafter\def\csname pkgurl@magic-haskell\endcsname{https://github.com/EagleoutIce/magic-haskell}
+\expandafter\def\csname pkgurl@flowR\endcsname{https://github.com/flowr-analysis/flowr}
+\newcommand\code{\lstinline[language=lLatex,language addons=latex,basicstyle=\ttfamily,columns=flexible,keepspaces]}
+
+% badges: what a feature needs
+\colorlet{badge-plain}{latte-green}\colorlet{badge-flowr}{plum}\colorlet{badge-r}{latte-blue}
+\colorlet{badge-backend}{latte-text}
+\newcommand\badge[2]{\tikz[baseline=(b.base)]\node[fill=badge-#1!13,text=badge-#1!85!black,rounded corners=1.6pt,
+  inner xsep=2.5pt,inner ysep=1.2pt,font=\sffamily\scriptsize\bfseries](b){\strut#2};}
+\newcommand\needsnothing{\badge{plain}{always}}
+\newcommand\needsflowr{\badge{flowr}{flowR}}
+\newcommand\needsr{\badge{r}{R}}
+\let\needsplain\needsnothing
+\newcommand\backend[1]{\badge{backend}{#1}}
+\newcommand\backends[1]{\foreach\b in{#1}{\backend{\b}\,}\unskip}
+
+\setkomafont{disposition}{\rmfamily\bfseries}
+\setkomafont{subtitle}{\rmfamily\itshape}
+\setkomafont{descriptionlabel}{\normalfont}
+\setlist{nosep,itemsep=2pt,leftmargin=*}
+\newcommand\descbullet[1]{\llap{\textbullet\enspace}#1}
+\setlist[description]{format=\descbullet,labelindent=0pt,leftmargin=1.5em,itemsep=\medskipamount}
+\setlength\emergencystretch{3em}
+\usepackage[headsepline]{scrlayer-scrpage}
+\clearpairofpagestyles
+\ihead{\TT{magic-r}}
+\ohead{\href{https://github.com/EagleoutIce/magic-r}{\TT{github.com/EagleoutIce/magic-r}}}
+\cfoot*{\pagemark}
+\setkomafont{pageheadfoot}{\normalfont\small\color{gray}}
+\deftocheading{toc}{}
+\RedeclareSectionCommand[tocbeforeskip=0pt]{section}
+
+% the shipped database, read once more for the appendix: three packages per row
+\makeatletter
+\def\db@rows{}\newcount\db@n\newcount\dbpackages\newcount\db@col
+\def\db@docs@rman{R}\def\db@docs@cran{C}
+\def\db@cell#1#2#3#4{\TT{#1}\,\textsuperscript{\textcolor{gray}{#3}} & \textcolor{gray}{\scriptsize\TT{#2}} & #4}
+\begingroup
+\renewcommand\mrPackage[4][cran]{\global\db@n\z@\global\advance\dbpackages\@ne
+  \def\N{\db@names}\def\T##1{\db@names}\def\U##1{\db@names}#4%
+  \xappto\db@rows{\noexpand\db@cell{#2}{#3}{\csname db@docs@#1\endcsname}{\the\db@n}}%
+  \global\advance\db@col\@ne
+  \ifnum\db@col=3 \global\db@col\z@\gappto\db@rows{\tabularnewline}\else\gappto\db@rows{&}\fi}
+\renewcommand\mrOperators[1]{}
+\def\db@names#1{\@for\db@t:=#1\do{\ifx\db@t\@empty\else\global\advance\db@n\@ne\fi}}
+\input{magic-r-links.cfg}
+\endgroup
+\ifnum\db@col=0 \else\loop\ifnum\db@col<3 \gappto\db@rows{&&}\ifnum\db@col<2 \gappto\db@rows{&}\fi
+  \advance\db@col\@ne\repeat\gappto\db@rows{\tabularnewline}\fi
+\let\databaserows\db@rows
+\makeatother
+
+\title{\TT{magic-r}}
+\subtitle{R listings that link to their documentation, with flowR and R}
+\author{\href{mailto:florian.sihler@web.de}{Florian Sihler}\thanks{Released under the \href{https://www.latex-project.org/lppl.txt}{LaTeX Project Public License}, version 1.3c or later.}}
+\date{Version v1.0 \textendash{} 2026/10/10\\[.5ex]
+  \normalsize\href{https://github.com/EagleoutIce/magic-r}{\TT{github.com/EagleoutIce/magic-r}}}
+
+\begin{document}
+\maketitle
+\setcounter{tocdepth}{1}
+\tableofcontents
+
+\section{Introduction}
+This package allows you to write plain R in your documents and slides, and get listings that link
+every known name to its help page, in R's own manual or on \href{https://rdrr.io}{rdrr.io}.
+Everything you define links back to its definition. Packages attach at the points where the code
+loads them, so after \bmr{library(dplyr)} the name \bmr{filter} means \bmr{dplyr::filter}, and
+before it \bmr{stats::filter}. Everything builds on \pkg{xlistings} and works with its styles,
+environments, inline commands, and \TT{minted} emulation. The package is the sibling of
+\pkg{magic-haskell} for R.
+
+\begin{mr}
+library(dplyr)
+
+#' The mean consumption per number of cylinders
+#' @param data a data frame like mtcars
+consumption <- function(data, min_cyl = 4) {
+  data |>
+    filter(cyl >= min_cyl) %>%
+    group_by(cyl) |>
+    summarise(mpg = mean(mpg), n = n())
+}
+consumption(mtcars)
+\end{mr}
+
+In this listing, the functions of dplyr and R link to their help pages, \bmr{consumption} and its
+parameters link to their definitions, and the named arguments (\bmr{mpg = ...}) do not link. The
+roxygen comment shows its tags, and the operators are symbols that copy as \TT{<-} and \TT{|>}.
+R can also compute values for the text: \code|\mrValue{round(mean(mtcars$mpg), 2)}| gives
+\mrValue{round(mean(mtcars$mpg), 2)}, which took R \mrRTimeText.
+
+Each feature in this manual has a badge that says what it needs:
+\begin{description}
+\item \needsnothing{} works with nothing installed: the shipped database of \the\dbpackages{}
+  packages, R's search path, definitions, roxygen, ligatures, and markers (\cref{sec:plain}).
+\item \needsflowr{} needs \pkg{flowR}, a static analyzer for R (\cref{sec:flowr}). The badges
+  \backends{node,docker,r,web} name the backends of flowR a feature works with (\cref{sec:backends}).
+\item \needsr{} needs R, which computes values and console sessions (\cref{sec:r}).
+\end{description}
+
+\section{Getting Started}
+\begin{latex}
+\usepackage[eval]{magic-r} % 'eval': ask R for values and sessions
+\usepackage{hyperref}      % links need hyperref, load it after magic-r
+...
+\begin{mr}
+x <- paste("a", 1:3)
+\end{mr}
+\end{latex}
+The language is called \TT{mr}, so there is an environment \env{mr}, the inline command
+\cmd{bmr}, and \TT{\textbackslash begin\{minted\}\{mr\}} (see \pkg{xlistings} for all of them).
+flowR and R need \TT{-shell-escape} and only run when their input changed. Without it, the package
+warns, prints the command to run by hand, and the answers show \textbf{??}.
+
+\subsection{Package Options}\label{sec:options}
+\begin{description}
+\item \option{language}{mr} the name of the language, \TT{language=R} replaces the R of \pkg{xlistings}.
+\item \option{links}{true}, \option{underline}{true} link names, and underline the links slightly
+  (in the color \TT{mrlink}). \cmd{mrLinksOn}, \cmd{mrLinksOff}, \cmd{mrUnderlineOn}, and
+  \cmd{mrUnderlineOff} switch them anywhere, the key \key{mrlinks}\TT{=false} for one listing.
+\item \option{locallinks}{true} link names to their definitions in the document (\cref{sec:definitions}).
+  \cmd{mrLocalLinksOn} and \cmd{mrLocalLinksOff} switch them anywhere, the key \key{mrlocallinks}\TT{=false}
+  for one listing.
+\item \option{ligatures}{true}, \option{tight}{true} typeset operators such as \TT{<-} with their
+  characters moved closer together, \option{symbols}{false} replaces them by symbols, such as an arrow
+  for \TT{<-} (\cref{sec:ligatures}). \cmd{mrLigaturesOn}, \cmd{mrLigaturesOff}, \cmd{mrTightOn},
+  and \cmd{mrTightOff} switch them.
+\item \option{operators}{false} link operators and keywords to R's help as well: \TT{<-} to
+  \TT{assignOps}, \TT{|>} to \TT{pipeOp}, \TT{if} to \TT{Control}, \TT{::} to \TT{ns-dblcolon}. They
+  keep their color.
+\item \option{strict}{false} link only names of attached packages. Otherwise a name of a package
+  the document uses links even before it is attached.
+\item \option{database}{magic-r-links} the file of the database (without \TT{.cfg}).
+\item \option[flowr]{flowr}{auto} when flowR runs: \TT{auto} with unrestricted shell escape, \TT{always},
+  \TT{never} (it prints the command to run by hand), or \TT{off}, which also stops writing the code.
+\item \option[flowr]{flowr-backend}{} the backend of flowR to use, e.g.\ \TT{node} or \TT{docker}
+  (\cref{sec:backends}). By default the first one that works.
+\item \option[flowr]{flowr-engine}{lax} how flowR parses: \TT{lax} is tree-sitter with its lax parser,
+  which reads code with syntax errors, so a fragment in one listing does not hide the others.
+  \TT{tree-sitter}, \TT{r-shell} (needs R), and \TT{default} are the others.
+\item \option[flowr]{flowr-command}{} the flowR command line to run, e.g.\ of a local build, \option[flowr]{flowr-image}{} the
+  image of docker (\cref{sec:backends}).
+\item \option[flowr]{flowr-version}{} the version flowR must have: \TT{2.15.10} exactly, or a bound such as
+  \TT{>=2.15} or \TT{<3}.
+\item \option[flowr]{flowr-required}{false} turn a missing or failing flowR into an error instead of a
+  warning. For example, \code|flowr-backend=node, flowr-version={>=2.15}, flowr-required| requires the
+  flowR command line in version 2.15 or later.
+\item \option{index}{none} index the symbols of every listing, by \TT{usage} or as \TT{ssa} (\cref{sec:index}).
+\item \option[flowr]{slices}{dim} gray out (\TT{dim}) or leave out (\TT{hide}) what a slice drops (\cref{sec:slices}).
+\item \option[flowr]{lint}{false} run flowR's linter on every listing (\cref{sec:lint}).
+\item \option[flowr]{dependencies}{false} mark the lines that read, write, or source files (\cref{sec:deps}).
+\item \option[flowr]{graphs}{false} load TikZ for the graphs of flowR (\cref{sec:graphs}).
+\item \option[flowr]{graphs-gray}{false} draw the graphs in shades of gray, for print.
+\item \option[flowr]{graphs-legend}{false} give graphs a legend by default (\cref{sec:graphs}).
+\item \option[flowr]{playground}{false} a button beside every listing opens it in flowR's playground (\cref{sec:playground}).
+\item \option[flowr]{interactive}{} load \pkg{ocgx2} for listings whose arrows a click shows or hides (key
+  \TT{mrinteractive}), \TT{interactive=all} makes every listing so (\cref{sec:arrows}).
+\item \option[r]{eval}{false} let R compute values and sessions (\cref{sec:r}).
+\item \option{xlistings}{} options for \pkg{xlistings}, e.g.\ \TT{xlistings=\{style=\{plain number\}\}}.
+\end{description}
+
+\section{Linking without flowR}\label{sec:plain}
+\needsnothing{} Needs nothing but \LaTeX.
+
+\subsection{Linking to the Documentation}\label{sec:database}
+Each package of the database lists its names by help topic, and a name links to the page of its
+topic: R's manual (\cmd{mrDocsRManual}) for R's own packages, \href{https://rdrr.io}{rdrr.io}
+(\cmd{mrDocsCran}) for CRAN, and a package name to its CRAN page (\cmd{mrCran}). Redefine these
+macros to link elsewhere. A package is only read when a document uses it. The database holds all
+of R's own and recommended packages, the whole tidyverse, and other popular packages,
+\the\dbpackages{} in all (\cref{sec:dbtable}).
+
+\subsection{Attaching Packages}
+As in R, the attached packages form a search path, and a name links to the first package on it
+that exports it. It starts with R's defaults (\cmd{mrDefaultSearchPath}). \bmr{library(pkg)} and
+\bmr{require(pkg)} attach a package where they appear, but not \bmr{library(p, character.only = TRUE)},
+where \bmr{p} is a variable. By hand:
+\begin{description}
+\item \cmd{mrAttach}\TT{\{pkg,...\}}, \cmd{mrDetach}\TT{\{pkg,...\}} attach and detach packages.
+  The key \key{attach} does the same for a listing, \code|\bmr[attach=dplyr]{n()}|.
+\item \cmd{mrSearchPath}\TT{\{pkg,...\}} sets the whole path, the first package is searched first.
+\item \cmd{mrLoadPackage}\TT{\{pkg,...\}} reads packages without attaching them, so that their
+  names link if no attached package has them (unless \TT{strict}).
+\item \cmd{mrVersion}\TT{\{pkg\}} is the version of a package in the database:
+  \TT{dplyr} \mrVersion{dplyr}.
+\end{description}
+\bmr{pkg::name} and \bmr{pkg:::name} always link into the package.
+
+\subsection{Linking Your Own Definitions}\label{sec:definitions}
+In a displayed listing, these define \TT{x}:
+\begin{itemize}
+\item an assignment at the start of a line: \bmr{x <- 1}, \bmr{x <<- 1}, \bmr{x = 1},
+\item an assignment to the right: \bmr{1:3 -> x}, \bmr{1:3 ->> x},
+\item \bmr{assign("x", 1)},
+\item a parameter: \bmr{function(x, n = 2)}, only within its listing.
+\end{itemize}
+A use of \TT{x} links to the definition in the same listing, else to the last one before, else to
+the first one after. In \bmr{get("x")}, \bmr{get0("x")}, and \bmr{exists("x")}, the string links to
+the definition and keeps its color. Functions (\bmr{f <- function(x)}, \expandafter\bmr\expandafter{\doclambda}) look like the
+functions of packages, variables keep the color of the code, and parameters get the color
+\TT{mrparam}. An indented assignment only counts within its listing.
+The key \key{mrdefinitions} switches this off (\TT{false}) or keeps all definitions of a listing
+local (\TT{local}). Definitions come from the aux file, so they need a second run, as references do.
+\begin{mrdemo}
+square <- function(x) x^2
+square(3) + square(4) -> total
+assign("half", total / 2)
+get("half")
+\end{mrdemo}
+Now \bmr{total}, \bmr{half}, and \bmr{square(2)} link to their definitions.
+
+\subsection{Names That Never Link}
+Strings and comments, named arguments (\bmr{paste(sep = "")}, found in the previous run), what
+follows \TT{\$} and \TT{@} (\bmr{df$mean}), and R's keywords never link.
+
+\subsection{Highlighting Roxygen Comments}
+Comments that start with \TT{\#'} are roxygen documentation: their tags (\TT{@param}) and the name
+after \TT{@param} stand out, and \bmr{pkg::name} links, as in \TT{[base::sum()]}.
+\begin{mrdemo}
+#' Scale values to the unit interval, see [base::range()]
+#' @param x a numeric vector
+#' @return x, scaled
+#' @export
+unit <- function(x) (x - min(x)) / diff(range(x))
+\end{mrdemo}
+
+\subsection{Writing Inline Code}
+\cmd{bmr} reads its argument verbatim, so \TT{\%}, \TT{\#}, \TT{\$}, and \TT{\textbackslash} need no
+escape: \code|\bmr{x %in% y$z}| gives \bmr{x %in% y$z}. Within the argument of another
+command (\code|\textbf{\bmr{...}}|) \TeX{} has read the characters already: write \TT{\textbackslash\%},
+\TT{\textbackslash\#}, and \TT{\textbackslash\$} there, and \TT{\textbackslash\textbackslash} for a backslash.
+
+\subsection{Indexing Symbols}\label{sec:index}
+\needsnothing{} The key \key{mrindex} (or the option \TT{index} for all listings) writes plain R with
+indices, as the \TT{IndexR} of \pkg{xlistings} does by hand. \TT{mrindex=usage} (the default)
+numbers the uses of each symbol, \TT{mrindex=ssa} the versions of each
+variable: a definition makes a new version, and a use has the version of the definition it reads.
+Without flowR, that is the last definition before its line. The indices do not copy.
+\cmd{mrUse}\TT{[label]\{symbol\}\{index\}} typesets a symbol with its index in the text and links to
+its place in the listing with the key \key{mrname}\TT{=label}, by default the last listing with a name.
+\begin{mrdemo}[mrindex,mrname=usage]
+x <- c(1, 2, 3)
+y <- x * 2
+x <- x + y
+print(mean(x))
+\end{mrdemo}
+\code|\mrUse{x}{4}| gives the fourth use of \TT{x}, \mrUse{x}{4}.
+\begin{mrdemo}[mrindex=ssa,mrname=ssa]
+x <- c(1, 2, 3)
+y <- x * 2
+x <- x + y
+print(mean(x))
+\end{mrdemo}
+\code|\mrUse{x}{2}| gives the second version of \TT{x}, \mrUse{x}{2}, and \code|\mrUse[usage]{x}{4}|
+refers to the listing before. In every listing with a name, \cmd{mrUse} also finds the uses of a
+symbol without indices. \cmd{mrUseAt}\TT{[label]\{criterion\}} names a place instead, with the index
+the listing shows: \code|\mrUseAt{3@[2]x}| gives \mrUseAt{3@[2]x}, the second \TT{x} of line 3,
+\code|\mrUseAt{2@y}| the first \TT{y} of line 2, \mrUseAt{2@y}, and \code|\mrUseAt{3:6}| the name at
+line 3, column 6 (of the code without its indentation), \mrUseAt{3:6}.
+
+\subsection{Adding and Blocking Links}\label{sec:adding}
+\cmd{mrAddLink}\TT{\{url\}\{names\}} links the names to a page of your choice, ahead of all packages.
+\cmd{mrNoLink}\TT{\{names\}} stops them from linking. \cmd{mrPackage}\TT{[docs]\{pkg\}\{version\}\{entries\}}
+adds a whole package, like the database: the entries \TT{\textbackslash N\{names\}} link to topics
+of the same name, \TT{\textbackslash T\{topic\}\{names\}} to a topic, \TT{\textbackslash U\{url\}\{names\}}
+to a page, and \TT{docs} is \TT{rman} or \TT{cran}. \cmd{mrOperators}\TT{\{\textbackslash\%op\textbackslash\%,...\}}
+declares \TT{\%op\%} operators.
+
+\subsection{Typesetting Operators}\label{sec:ligatures}
+\TT{<-}, \TT{|>}, and the other operators in \cmd{mrTightLigatures} move their characters closer
+together by \cmd{mrLigatureKern} (\TT{.05em}) but keep their width. With the option \TT{symbols}
+(on in this manual), \TT{<-}, \TT{<<-}, \TT{->}, \TT{->>}, \TT{|>}, \TT{<=}, \TT{>=}, \TT{!=},
+\TT{\&\&}, and \TT{||} become symbols of the same width, as in \bmr{x <- y |> f() && z != 0}.
+Selecting them copies the original text. Operators such as \TT{\%in\%} stay as they are.
+\cmd{mrTightLigature}\TT{\{op\}} and \cmd{mrLigature}\TT{\{op\}\{display\}} add others.
+
+\subsection{Marking Code}
+\TT{|warn|...|warn|}, \TT{|err|...|err|}, and \TT{|info|...|info|} put a band behind what they
+enclose, also over several lines, and keep its links. \TT{|plain|...|plain|} and \TT{|dim|...|dim|}
+typeset code plainly or dimmed, \TT{!*...*!} escapes to \LaTeX{} (not in inline code). flowR
+reads an escape as its text: \TT{!*\textbackslash textbf\{x\}*!} is \TT{x}.
+\begin{mrdemo}
+y <- |warn|sapply(x, mean)|warn| + |err|undefined_thing|err|
+\end{mrdemo}
+
+\section{Analyzing with flowR}\label{sec:flowr}
+\needsflowr{} \pkg{magic-r} writes the code of all listings to \TT{\textbackslash jobname.mr.R}. If
+it changed, the script \TT{magic-r-flowr.mjs} (needs \TT{node}) asks flowR at the end of the run and
+writes the answer to \TT{\textbackslash jobname.mr.cfg} for the next run. If flowR cannot run, a
+warning says why and \cref{sec:plain} still applies. The key \key[flowr]{mrcapture}\TT{=false} keeps a listing from flowR.
+
+\subsection{Choosing a Backend}\label{sec:backends}
+magic-r uses the first of these backends that works, or the one the option \TT{flowr-backend} sets:
+\begin{description}
+\item \backend{node} the flowR command line: the option \TT{flowr-command}, \TT{\$MAGIC\_R\_FLOWR}, or \TT{flowr} on
+  the path (\TT{npm install -g @eagleoutice/flowr}). A local build of flowR works as well:
+  \code|flowr-command={node ~/flowr/dist/src/cli/flowr.js}|.
+\item \backend{docker} the image of the option \TT{flowr-image} (default \TT{eagleoutice/flowr:latest}), if
+  docker has it.
+\item \backend{r} the R package \TT{flowr}.
+\item \backend{web} the signature table of \href{https://flowr-analysis.github.io/flowr/wiki/sigdb/}{flowR's signature
+  browser}, with the loads found by a plain scan of the code. It knows packages, nothing else.
+\end{description}
+Packages that flowR does not know are read from an installed R. Each package is cached per version
+(\TT{\$MAGIC\_R\_CACHE}, else the user's cache).
+\begin{description}
+\item \cmd[flowr]{mrFlowrOptions}\TT{\{options\}} passes options to the script, e.g.\
+  \code|\mrFlowrOptions{--timeout 300}| or \TT{--flowr <command>}, see \TT{node magic-r-flowr.mjs --help}.
+\item \cmd[flowr]{mrFlowrRun}\TT{\{auto|always|never\}} overrides the option \TT{flowr}, \cmd[flowr]{mrNodeCommand}\TT{\{node\}}
+  the command of node.
+\end{description}
+\backends{node,docker} To compare flowR versions or builds on one document, a listing (key
+\key[flowr]{mrflowr}) or a graph or query (key \key[flowr]{flowr}) can name another flowR, as
+\TT{docker:<image>} or \TT{node:<command>}. That flowR answers the graphs, slices, arrows, findings, and
+queries of the listing or command, while names still link as the document's flowR says. \cmd[flowr]{mrFlowrDescription}\TT{\{flowr\}}
+says which flowR answered, \cmd[flowr]{mrFlowrDescription}\TT{\{\}} the one of the document (here:
+\mrFlowrDescription{}).
+
+\subsection{Finding Packages}
+\backends{node,docker,r,web} flowR finds every package the code loads or uses, also the ones the
+database lacks, and where it is loaded: through \bmr{pacman::p_load}, in a loop over
+\bmr{library(p, character.only = TRUE)}, or with \bmr{requireNamespace}.
+\begin{mrdemo}
+pkgs <- c("tidyr", "purrr")
+for (p in pkgs) library(p, character.only = TRUE)
+pivot_longer(relig_income, !religion) |> map(nrow)
+\end{mrdemo}
+
+\subsection{Linking Names by Dataflow}
+\backends{node,docker,r} flowR's dataflow graph replaces the rules of \cref{sec:definitions}:
+\begin{itemize}
+\item Every definition counts, wherever it is (\bmr{if (ok) y <- 1}, in a loop, in a function),
+  and every use links to the definition it reads, also across listings and in inline code.
+\item A local variable named like a function of a package (\bmr{filter <- 2}) links to its definition,
+  while \bmr{filter(df)} still calls the function of the package.
+\item A backtick name (\TT{`my var`}) links as one name.
+\item Parameters link within their function, named arguments never link, and
+  \bmr{library(p, character.only = TRUE)} reads the variable \bmr{p}.
+\end{itemize}
+flowR parses with tree-sitter's lax parser (option \TT{flowr-engine}), so a fragment such as
+\bmr{f(x, } does not hide the code around it.
+
+\subsection{Marking File Access}\label{sec:deps}
+\backends{node,docker,r} With the option \TT{dependencies} or the key \key[flowr]{mrdependencies}, lines
+that \textcolor{mrread}{read}, \textcolor{mrwrite}{write}, \textcolor{mrsource}{source}, or
+\textcolor{mrvisualize}{plot} get a band in the colors \TT{mrread}, \TT{mrwrite}, \TT{mrsource},
+and \TT{mrvisualize}, and the first line of a run names its kind at the right. Printing is no write.
+\begin{mrdemo}[mrdependencies,mrname=files]
+raw <- read.csv("measurements.csv")
+source("helpers.R")
+clean <- subset(raw, !is.na(value))
+write.csv(clean, "clean.csv")
+plot(clean$value, type = "l")
+lines(lowess(clean$value), col = "steelblue")
+title("Measurements")
+\end{mrdemo}
+
+\subsection{Slicing Listings}\label{sec:slices}
+\backends{node,docker,r} The key \key[flowr]{mrslice}\TT{=\{criterion\}} keeps what affects the
+criterion: a variable in a line (\TT{5@total} for its first occurrence there, \TT{3@[2]v} for the
+second), or a line and column (\TT{5:1}). The key
+\key[flowr]{mrslicemode} (default: the option \TT{slices}) grays out the other lines (\TT{dim}) or
+leaves them out (\TT{hide}), with the numbers of the lines kept.
+\begin{mrdemo}[mrslice={5@total}]
+total <- 0
+count <- 0
+for (v in c(1, 4, 9)) total <- total + v
+count <- count + 1
+print(total)
+\end{mrdemo}
+\begin{mrdemo}[mrslice={5@total},mrslicemode=hide]
+total <- 0
+count <- 0
+for (v in c(1, 4, 9)) total <- total + v
+count <- count + 1
+print(total)
+\end{mrdemo}
+
+\subsection{Underlining Linter Findings}\label{sec:lint}
+\backends{node,docker,r} The key \key[flowr]{mrlint} (or the option \TT{lint} for every listing)
+runs flowR's linter. A finding gets a wavy line below its code, red if flowR is certain, else
+orange, and its line names the rules at the right, linked to their description in flowR's wiki.
+With the option \TT{playground}, a finding opens flowR's playground with the finding marked.
+\cmd[flowr]{mrLintShape}\TT{\{wave|dash|line\}}
+chooses the line. \TT{mrlint=\{["unused-definitions"]\}} picks rules
+(with their configuration, as in flowR's query API), \cmd[flowr]{mrLinterRules}\TT{\{rules\}} sets them for
+all listings.
+\begin{mrdemo}[mrlint]
+data <- read.csv("/home/me/data.csv")
+unused <- nrow(data)
+setwd("/tmp")
+print(summary(data))
+\end{mrdemo}
+
+\subsection{Drawing Arrows to Definitions}\label{sec:arrows}
+\backends{node,docker,r} With the option \TT{graphs}, the key \key[flowr]{mrarrows}\TT{=\{criteria\}}
+draws an arrow from the name each criterion points at to every definition it reads. Other names get
+no arrows. An arrow runs below the line of the use, along a lane left of the code, and below the
+line of the definition into it, so it crosses no letters. An arrow within one line stays below that
+line. Arrows that would overlap get their own height below a line and their own lane. Each criterion (in an interactive listing, each variable) has a color (\TT{mrarrow1} to
+\TT{mrarrow5}, in order), the names of the
+criteria get a darker band and the definitions a lighter one. \cmd[flowr]{mrArrowGap},
+\cmd[flowr]{mrArrowTrack}, and \cmd[flowr]{mrArrowLane} set the distances, the TikZ style
+\TT{mr arrow} the look. A listing with arrows is not broken across pages.
+
+\begin{mrdemo}[mrarrows={6@total, 4@v, 5@[2]count}]
+total <- 0
+count <- 0
+for (v in c(1, 4, 9))
+  total <- total + v
+count <- count + 1
+print(total)
+\end{mrdemo}
+
+With the option \TT{interactive} (it loads \pkg{ocgx2}), the key \key[flowr]{mrinteractive} makes
+every name of a listing a switch for its arrows, as optional content of the PDF: a click on a use
+shows or hides the arrows to the definitions it reads, a click on a definition those of the uses
+that read it. The names the criteria of \TT{mrarrows} point at show theirs at first, and
+\TT{interactive=all} makes every listing interactive. An interactive listing has no links to the
+definitions of the document, so that a click on a name always shows or hides its arrows
+(\TT{mrlocallinks=false}, which \TT{mrlocallinks=true} undoes). This works on beamer slides as well, and in
+viewers that support optional content, such as Acrobat Reader or Okular. Click the names below:
+\begin{mrdemo}[mrinteractive,mrlocallinks=false,mrarrows={6@total}]
+total <- 0
+count <- 0
+for (v in c(1, 4, 9))
+  total <- total + v
+count <- count + 1
+print(total)
+\end{mrdemo}
+
+
+\subsection{Drawing Dataflow and Control Flow Graphs}\label{sec:graphs}
+\backends{node,docker,r} With the option \TT{graphs}, \cmd[flowr]{mrDataflowGraph}\TT{[keys]\{label\}}
+draws the dataflow graph of the listing with the key \key{mrname}\TT{=label},
+\cmd[flowr]{mrControlFlowGraph}\TT{[keys]\{label\}} its control flow graph in basic blocks, and
+\cmd[flowr]{mrCallGraph}\TT{[keys]\{label\}} its call graph: which function calls which, from the top level
+to the functions of R. Their keys:
+\begin{description}
+\item \key[flowr]{legend}\TT{=true|false} a legend below the graph that names its shapes and edges
+  (default: the option \TT{graphs-legend}),
+\item \key[flowr]{rowsep}\TT{=cm} the least distance between rows (default \TT{0.2}), rows with edges
+  running sideways get more,
+\item \key[flowr]{mermaid}\TT{=text} instead of the graph a link to flowR's own drawing of it on
+  \href{https://mermaid.live}{mermaid.live} (default text \TT{mermaid.live}), made from the current code,
+\item \key[flowr]{function}\TT{=name} only what a function calls, for the call graph,
+\item \key[flowr]{flowr}\TT{=flowr} another flowR for this graph (\cref{sec:backends}),
+\item any other key is an option of TikZ, e.g.\ \TT{scale=.7,transform shape}.
+\end{description}
+A vertex of the dataflow graph shows its id (\cmd[flowr]{mrGraphId}) and what it reads or calls of R
+itself (\cmd[flowr]{mrGraphBuiltin}). As in flowR's mermaid graphs, definitions are rectangles, uses
+stadiums, values hexagons, and calls have bars at their sides. In the control flow graph, the entry
+and the exits are stadiums and conditions hexagons. TikZ styles such as \TT{mr node}, \TT{mr vdef},
+\TT{mr fcall}, or \TT{mr reads} change the look.
+\begin{mrdemo}[mrname=loop]
+total <- 0
+for (v in c(1, 4, 9)) {
+  if (v > 2) total <- total + v
+}
+print(total)
+\end{mrdemo}
+\Cref{fig:graphs} shows the graphs of this listing.
+\begin{figure}[htbp]
+\begin{latex}
+\mrDataflowGraph[legend]{loop} \hfill
+\mrControlFlowGraph[legend,rowsep=0.3]{loop}
+\end{latex}
+\begin{center}
+\mrDataflowGraph[legend]{loop}\hfill
+\mrControlFlowGraph[legend,rowsep=0.3]{loop}
+\end{center}
+\caption{The dataflow graph and the control flow graph of the listing \TT{loop}.}\label{fig:graphs}
+\end{figure}
+
+A listing with functions has a call graph:
+\begin{mrdemo}[mrname=calls]
+scale <- function(x) (x - mean(x)) / sd(x)
+score <- function(df) scale(df$value) * 10
+fib <- function(n) if (n < 2) n else fib(n - 1) + fib(n - 2)
+print(score(data.frame(value = sapply(1:8, fib))))
+\end{mrdemo}
+\begin{latex}
+\mrCallGraph{calls} \hfill \mrCallGraph[function=scale,legend]{calls}
+The \mrDataflowGraph[mermaid=dataflow graph]{calls} and the
+\mrCallGraph[mermaid=call graph]{calls} of flowR.
+\end{latex}
+\begin{center}
+\mrCallGraph{calls}\hfill\mrCallGraph[function=scale,legend]{calls}
+\end{center}
+The \mrDataflowGraph[mermaid=dataflow graph]{calls} and the \mrCallGraph[mermaid=call graph]{calls} of flowR.
+
+Several listings, separated by commas, form one program, as files of a project do. Their
+dataflow graph frames the vertices of each listing:
+\begin{mrdemo}[mrname=helpers]
+scale <- function(x) (x - mean(x)) / sd(x)
+\end{mrdemo}
+\begin{mrdemo}[mrname=main]
+values <- c(3, 1, 4)
+z <- scale(values)
+print(z)
+\end{mrdemo}
+\begin{latex}
+\mrDataflowGraph{helpers,main}
+\end{latex}
+\begin{center}
+\mrDataflowGraph{helpers,main}
+\end{center}
+
+\subsection{Opening Listings in flowR's Playground}\label{sec:playground}
+\backends{node,docker,r,web} With the option \TT{playground} (or the key \key[flowr]{mrplayground}
+for one listing), a button \mrPlayButton{} at the right of the first line opens the code of the listing
+in \href{https://flowr-analysis.github.io/flowr/wiki/playground/}{flowR's playground}, with the criteria
+of \TT{mrslice} and \TT{mrarrows} marked. The link only needs the script and \TT{node}, not flowR.
+The code keeps its indentation. This manual has the option on, \TT{mrplayground=false} turns it off
+for a listing. By default the button is a thin gray ring,
+\cmd[flowr]{mrPlayStyle}\TT{\{filled\}} (as in this manual, with \TT{mrplay} a blue) a disc. The color
+\TT{mrplay} and \cmd[flowr]{mrPlaySize} change it, redefining \cmd[flowr]{mrPlayButton} replaces it.
+
+\subsection{Requesting flowR Queries}
+\backends{node,docker,r} \cmd[flowr]{mrFlowrQuery}\TT{[block=label,path=/json/pointer]\{name\}\{query\}} asks flowR
+any query of its \href{https://github.com/flowr-analysis/flowr/wiki/Query-API}{query API} about a
+listing (\key[flowr]{block}) or the whole document, and \cmd[flowr]{mrFlowrValue}\TT{\{name\}} shows the part of
+the answer the JSON pointer \key[flowr]{path} names. A query can come before or after its value. For the
+listing \TT{files} of \cref{sec:deps}:
+\begin{latex}
+\mrFlowrQuery[block=files,path=/dependencies/read/0/value]
+  {reads}{[{"type": "dependencies"}]}
+\mrFlowrQuery[block=files,path=/dependencies/write/0/functionName]
+  {writer}{[{"type": "dependencies"}]}
+The listing reads \mrFlowrValue{reads} and writes with \mrFlowrValue{writer}.
+\end{latex}
+\mrFlowrQuery[block=files,path=/dependencies/read/0/value]{reads}{[{"type": "dependencies"}]}%
+\mrFlowrQuery[block=files,path=/dependencies/write/0/functionName]{writer}{[{"type": "dependencies"}]}%
+gives: \enquote{The listing reads \mrFlowrValue{reads} and writes with \mrFlowrValue{writer}.}
+Before flowR has answered, queries, graphs, and values show \textbf{??}.
+
+\section{Computing with R}\label{sec:r}
+\needsr{} With the option \TT{eval}, one \TT{Rscript} answers all queries of a run at its end
+(\TT{\textbackslash jobname.mr-eval.R}, answers in \TT{\textbackslash jobname.mr-eval.out} for the next run),
+only if they changed. Queries share one environment, in order, like a notebook.
+\begin{description}
+\item \cmd[r]{mrValue}\TT{\{expr\}} (verbatim) and \cmd[r]{mrValueOf}\TT{\{expr\}} (a regular argument): the
+  value as text, \mrValue{format(Sys.Date(), "%Y")} or \mrValue{letters[1:3]}.
+\item \cmd[r]{mrEval}\TT{\{expr\}}, \cmd[r]{mrEvalOf}: what R prints, as code: \mrEval{range(c(1, 4, 9))}.
+\item \cmd[r]{mrValueInto}\TT{\textbackslash cs\{expr\}} stores the value, \cmd[r]{mrIfError}\TT{\{then\}\{else\}}
+  tells whether the last query failed, \cmd[r]{mrRTime} and \cmd[r]{mrRTimeText} the time it took.
+\item \cmd[r]{mrSource}\TT{\{file\}} answers the following queries in an environment with the file
+  sourced, \cmd[r]{mrSourceOff} ends that. The environment \env[r]{mrfile}\TT{[options]\{file\}} writes
+  its content to the file, typesets it, and sources it.
+\item \cmd[r]{mrRSetup}\TT{\{code\}} runs code first, \cmd[r]{mrRCommand}\TT{\{Rscript --vanilla\}} and
+  \cmd[r]{mrRRun}\TT{\{auto|always|never\}} choose how R runs. \cmd[r]{mrEvalSetFormat}, \cmd[r]{mrValueSetFormat},
+  and \cmd[r]{mrSetErrorFormat} choose how answers look.
+\end{description}
+
+\subsection{Showing Console Sessions}
+The environment \env[r]{rsession} runs its lines like R's console (an input may span lines) in an
+environment of its own, and shows prompts that do not copy. Names defined in a session link to
+their definition within it. On beamer slides, the inputs appear one after the other (keys
+\key[r]{animate}, \key[r]{start}, \key[r]{listing}, and \cmd[r]{mrSessionSetup} sets them for all sessions).
+\begin{latex}
+\begin{rsession}
+x <- c(4, 8, 15, 16, 23, 42)
+mean(x)
+summary(x > 10)
+\end{rsession}
+\end{latex}
+\begin{rsession}
+x <- c(4, 8, 15, 16, 23, 42)
+mean(x)
+summary(x > 10)
+\end{rsession}
+
+\section{Known Limitations}
+\needsnothing{} Without flowR:
+\begin{itemize}
+\item Names link by the rules of R's search path and the definitions of \cref{sec:definitions}: a
+  local variable named like a function of a package links to the package, unless the document
+  defines it or \cmd{mrNoLink} keeps it from linking, and a definition that does not start a line
+  (\bmr{if (ok) y <- 1}) defines nothing.
+\item Methods (\bmr{setMethod}, \bmr{R6Class}) define nothing, and parameters of the same name in
+  one listing all link to the first one.
+\item Backtick names (\TT{`my var`}) look like names but only link with flowR.
+\item Within the argument of another command, inline code needs \TT{\textbackslash\%}, \TT{\textbackslash\#},
+  and \TT{\textbackslash\$}, and escapes to \LaTeX{} do not work in inline code.
+\end{itemize}
+\needsflowr{} With flowR, these limitations are gone, but
+\begin{itemize}
+\item code that even the lax parser cannot read falls back to the rules without flowR,
+\item a listing with \TT{mrslicemode=hide} shows all of its code again once, after its code changed,
+\item a listing with arrows is not broken across pages,
+\item \backend{web} only knows packages: no names, lines, slices, graphs, or queries.
+\end{itemize}
+\needsr{} R runs all queries of a run in one session. A query that never ends stops all of them.
+
+\section{Benchmark}
+\TT{bench/run.sh} (or \TT{l3build bench}) times the listings of \TT{bench/cases.txt}, generated R
+code with definitions, pipes, loops, and file access, with pdf\TeX's timer (without start-up and
+shipout). Each case is typeset five times in four variants, timing the second of two runs: the R of
+\pkg{xlistings} without links, \pkg{magic-r} with its database only, with the definitions of the
+document, and with the answer of flowR. The last column is the whole run that computes the answer of
+flowR (document, script, and flowR in docker), which a document only pays when its code changed.
+\begin{center}
+\small
+\IfFileExists{bench/bench-results.tex}{\input{bench/bench-results.tex}}
+  {\IfFileExists{bench-results.tex}{\input{bench-results.tex}}% l3build doc
+    {\textit{Run \texttt{sh bench/run.sh} to fill in this table.}}}
+\end{center}
+
+\appendix
+\section{The Shipped Database}\label{sec:dbtable}
+The table lists each package with its version, its documentation (\textsuperscript{R} R's manual,
+\textsuperscript{C} rdrr.io), and the number of names that link.
+
+\TT{generate} builds the database from \TT{tools/packages.txt}: names from flowR's signature
+database, help topics from R's help index, versions from the installed packages. \TT{verify}
+requests every linked page and lists the ones that fail (rdrr.io can lag behind CRAN), \TT{--prune}
+drops their names. A weekly job of the repository verifies the database.
+\begin{bash}
+node magic-r-flowr.mjs generate        # tools/packages.txt -> magic-r-links.cfg
+node magic-r-flowr.mjs verify          # lists the pages that fail
+node magic-r-flowr.mjs verify --prune  # ... and drops their names
+\end{bash}
+\begin{center}\small
+\begin{longtable}{@{}l@{\enspace}lr@{\qquad}l@{\enspace}lr@{\qquad}l@{\enspace}lr@{}}
+\toprule package & version & names & package & version & names & package & version & names\\\midrule\endhead
+\databaserows\bottomrule
+\end{longtable}
+\end{center}
+
+\printindex
+\end{document}

@@ -1,0 +1,2064 @@
+% magic-r.sty
+% R listings for xlistings: names link to their documentation (the R manual,
+% rdrr.io) or to their definition, packages attach as in R, operators become
+% ligatures that copy as plain text. flowR finds the packages of a document.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{magic-r}[2026/10/10 version v1.0 R listings with documentation links]
+
+\RequirePackage{kvoptions}
+\SetupKeyvalOptions{family=mr,prefix=mr@}
+\DeclareBoolOption[true]{links}
+\DeclareBoolOption[true]{locallinks}% names link to their definitions in the document
+\DeclareBoolOption[true]{ligatures}
+\DeclareBoolOption[true]{tight}
+\DeclareBoolOption{symbols}% operators as symbols ('<-' as an arrow), they copy as text
+\DeclareBoolOption[true]{underline}
+\DeclareBoolOption{strict}% link only names of attached packages
+\DeclareStringOption[magic-r-links]{database}
+\DeclareStringOption[mr]{language}
+\DeclareStringOption[auto]{flowr}% auto, always, never, or off
+\DeclareStringOption{flowr-backend}% node, docker, r, web
+\DeclareStringOption{flowr-version}% '2.15.10', '>=2.15'
+\DeclareStringOption{flowr-command}% the flowR command line to run, e.g. of a local build
+\DeclareStringOption{flowr-image}% the docker image of flowR, e.g. eagleoutice/flowr:2.15.10
+\DeclareStringOption{flowr-engine}% lax (tree-sitter, the default), tree-sitter, r-shell
+\DeclareBoolOption{flowr-required}% no flowR is an error
+\DeclareBoolOption{dependencies}% highlight lines that read, write, ...
+\DeclareBoolOption{operators}% link operators and keywords to R's help
+\DeclareStringOption[dim]{slices}% dim: gray out what a slice drops, hide: leave it out
+\DeclareStringOption[none]{index}% usage, ssa, or none: the default of the key mrindex
+\DeclareBoolOption{lint}% flowR's linter for every listing
+\DeclareBoolOption{graphs-gray}% the graphs in shades of gray
+\DeclareBoolOption{graphs-legend}% a legend below dataflow graphs
+\DeclareBoolOption{graphs}% load TikZ for \mrDataflowGraph and \mrControlFlowGraph
+\DeclareBoolOption{playground}% a button beside every listing opens it in flowR's playground
+\DeclareStringOption{interactive}[on]% on: the key mrinteractive works, all: every listing is interactive
+\DeclareBoolOption{eval}
+\DeclareStringOption{xlistings}
+\ProcessKeyvalOptions*
+\let\mrLanguage\mr@language
+
+\expandafter\RequirePackage\expandafter[\mr@xlistings]{xlistings}
+\RequirePackage{etoolbox}
+
+% \mr@map\f{text} passes each character of the text to \f, which appends to
+% \mr@out; a '\' that escapes a character ('\%') is dropped
+\def\mr@map#1#2{\def\mr@out{}\let\mr@f#1\expandafter\mr@map@\detokenize{#2}\@nil}
+\def\mr@map@#1{\ifx\@nil#1\else\ifnum`#1=92 \else\mr@f#1\fi\expandafter\mr@map@\fi}
+\def\mr@keep#1{\edef\mr@out{\mr@out#1}}
+\def\mr@apart#1{\edef\mr@out{\mr@out#1{}}}% no font ligatures ('>>')
+\def\mr@count#1{\edef\mr@out{\the\numexpr\mr@out+1}}
+\def\mr@len#1{\mr@map\mr@count{#1}\edef\mr@out{\the\numexpr0\mr@out}}
+\def\mr@str#1{\mr@map\mr@keep{#1}}
+% listings writes most non-letters as \lst@um<char>, digits through xlistings
+% as \xlst@dgt{<digit>}; with \mr@plain, a token expands to its characters
+\def\mr@plain{\let\lst@nolig\@empty\def\lst@outputspace{ }\def\xlst@dgt##1{##1}%
+  \def\xlst@pfx##1##2{##2}\def\textunderscore{_}\let\mr@op\@firstofone
+  \mr@umdefs}
+\begingroup\def\mr@out{}\count@=32
+\loop\advance\count@\@ne\ifnum\count@<127
+  \begingroup\lccode`\~=\count@\lowercase{\endgroup
+    \edef\mr@out{\unexpanded\expandafter{\mr@out}\noexpand\@namedef{lst@um\string~}{\string~}}}%
+\repeat
+\expandafter\endgroup\expandafter\def\expandafter\mr@umdefs\expandafter{\mr@out}
+% \mr@token: the characters of \lst@token
+\def\mr@tokenname{\begingroup\mr@plain\edef\mr@out{\the\lst@token}\edef\mr@out{\mr@out}%
+  \xdef\mr@token{\detokenize\expandafter{\mr@out}}\endgroup}
+
+% the colors are those of xlistings, e.g. \lstcolorlet{keywordB}{...}
+\colorlet{mr@colors@prompt}{gray}
+\colorlet{mrlink}{gray!14}
+\colorlet{mr@plain}{.}
+\def\mr@style@func{\xlstGetStyle{keywordC}}% names of packages
+\def\mr@style@user{\xlstGetStyle{keywordC}}% functions defined in the document
+\def\mr@style@var{\mr@style@plain}%           variables defined in the document
+\def\mr@style@pkg{\xlstGetStyle{keywordB}}%  'dplyr' in 'dplyr::filter' and 'library(dplyr)'
+\def\mr@style@op{\@declaredcolor{mr@colors@prompt}}
+\def\mr@style@plain{\color{mr@plain}}% links keep the color around them
+\def\mrPrompt#1{\textcolor{mr@colors@prompt}{#1}}
+\if@xlst@accuspp@available@
+\def\mr@copyas#1#2{\BeginAccSupp{method=escape,ActualText={#1}}#2\EndAccSupp{}}
+\def\mr@nocopy#1{\BeginAccSupp{method=hex,ActualText={}}#1\EndAccSupp{}}
+\else
+\def\mr@copyas#1#2{#2}\def\mr@nocopy#1{#1}
+\fi
+\AtBeginDocument{\ifdefined\href\let\mr@href\href\else\def\mr@href#1#2{#2}\mr@underlinefalse\fi
+  \ifdefined\hyperlink\else\def\hyperlink#1#2{#2}\fi}
+
+\def\mrUnderlineDepth{1.3pt}
+\def\mrUnderlineThickness{.4pt}
+\newbox\mr@box % listings uses \@tempboxa itself, and \aftergroup (hence the group)
+\def\mr@underline#1{\ifmr@underline\setbox\mr@box\hbox{\begingroup#1\endgroup}%
+  \rlap{\color{mrlink}\rule[-\mrUnderlineDepth]{\wd\mr@box}{\mrUnderlineThickness}}%
+  \box\mr@box\else#1\fi}
+% #1 style, #2 url (empty: neither link nor highlighting), #3 text
+\def\mr@show#1#2#3{\ifx\relax#2\relax#3\else
+  \ifmr@links\colorlet{mr@plain}{.}\mr@href{#2}{\mr@underline{\csname mr@style@#1\endcsname#3}}\else
+  {\csname mr@style@#1\endcsname#3}\fi\fi}
+
+% \mrPackage[scheme]{package}{version}{entries} stores the entries of a
+% package; only the packages a document uses are read (\mr@load). An entry
+% \N{names} links names to the help topics of the same name, \T{topic}{names}
+% to a topic, \U{url}{names} to any page. A later \mrPackage replaces an
+% earlier one, so the database of the document (flowR) wins.
+\newcommand\mrPackage[4][cran]{\ifcsname mr@loaded@#2\endcsname\else
+  \csgdef{mr@db@#2}{#4}\csgdef{mr@scheme@#2}{#1}\csgdef{mr@version@#2}{#3}\fi}
+\def\mr@load#1{\ifcsname mr@loaded@#1\endcsname\else\csgdef{mr@loaded@#1}{}%
+  \ifcsname mr@db@#1\endcsname\begingroup\def\mr@pkg{#1}%
+    \let\N\mr@db@N\let\T\mr@db@T\let\U\mr@db@U\csname mr@db@#1\endcsname\endgroup
+    \global\cslet{mr@db@#1}\@empty\fi\fi}
+\def\mr@db@N{\mr@db@names{}}
+\def\mr@db@T#1{\mr@str{#1}\expandafter\mr@db@names\expandafter{\expandafter\mr@t\expandafter{\mr@out}}}
+\def\mr@db@U#1{\mr@str{#1}\expandafter\mr@db@names\expandafter{\expandafter\mr@u\expandafter{\mr@out}}}
+% #1 target (empty: the name), #2 names; \mr@K@<name> lists the packages
+\def\mr@db@names#1#2{\def\mr@list{#2}\def\mr@target{#1}%
+  \@for\mr@n:=\mr@list\do{\ifx\mr@n\@empty\else\expandafter\mr@str\expandafter{\mr@n}%
+    \ifx\mr@target\@empty\csxdef{mr@L@\mr@pkg @\mr@out}{\noexpand\mr@t{\mr@out}}%
+    \else\global\expandafter\let\csname mr@L@\mr@pkg @\mr@out\endcsname\mr@target\fi
+    \csxappto{mr@K@\mr@out}{{\mr@pkg}}\fi}}
+% the links of the document come first, they are the package '.'
+\newcommand*\mrAddLink[2]{\begingroup\def\mr@pkg{.}\mr@db@U{#1}{#2}\endgroup}
+\newcommand*\mrNoLink[1]{\mrAddLink{}{#1}}
+\csgdef{mr@scheme@.}{cran}
+\newcommand*\mrVersion[1]{\ifcsname mr@version@#1\endcsname\csname mr@version@#1\endcsname\fi}
+\newcommand*\mrLoadPackage[1]{\forcsvlist\mr@load{#1}}
+
+% the documentation: R's manual for its own packages, rdrr.io for CRAN
+\def\mrDocsRManual{https://stat.ethz.ch/R-manual/R-devel/library}
+\def\mrDocsCran{https://rdrr.io/cran}
+\def\mrCran{https://cran.r-project.org/package=}
+% #1 package, #2 topic
+\def\mr@url@rman#1#2{\mrDocsRManual/#1/html/#2.html}
+\def\mr@url@cran#1#2{\mrDocsCran/#1/man/#2.html}
+\def\mr@pkgurl@rman#1{\mrDocsRManual/#1/html/00Index.html}
+\def\mr@pkgurl@cran#1{\mrCran#1}
+\def\mr@pkgurl#1{\ifcsname mr@scheme@#1\endcsname\csname mr@pkgurl@\csname mr@scheme@#1\endcsname\endcsname{#1}\fi}
+
+% \mr@path lists the attached packages, the last one attached first, as R does
+\def\mr@path{}
+\def\mr@attach#1{\mr@load{#1}\mr@detach{#1}\xdef\mr@path{{\detokenize{#1}}\unexpanded\expandafter{\mr@path}}}
+\def\mr@detach#1{\def\mr@t{}\edef\mr@w{\detokenize{#1}}%
+  \expandafter\mr@detach@\mr@path\@nil\global\let\mr@path\mr@t}
+\def\mr@detach@#1{\ifx\@nil#1\else\def\mr@n{#1}\ifx\mr@n\mr@w\else
+  \edef\mr@t{\unexpanded\expandafter{\mr@t}{#1}}\fi\expandafter\mr@detach@\fi}
+\newcommand*\mrAttach[1]{\forcsvlist\mr@attach{#1}}
+\newcommand*\mrDetach[1]{\forcsvlist\mr@detach{#1}}
+% the packages R attaches at startup, the first one is searched first
+\newcommand*\mrSearchPath[1]{\gdef\mr@path{}\def\mr@t{#1}%
+  \@for\mr@n:=\mr@t\do{\expandafter\mr@attach\expandafter{\mr@n}}}
+\def\mrDefaultSearchPath{base,methods,datasets,utils,grDevices,graphics,stats}
+% packages the document uses (aux file, flowR) are read up front, so that a
+% name links to them before they are attached ('strict' turns this off)
+\def\mr@uses#1{\ifcsname mr@used@#1\endcsname\else\csgdef{mr@used@#1}{}\gappto\mr@used{{#1}}\fi}
+\def\mr@used{}
+\let\mrUses\mr@uses
+\AtBeginDocument{\mr@readflowr\expandafter\mrSearchPath\expandafter{\mrDefaultSearchPath}%
+  \ifmr@strict\else\expandafter\@tfor\expandafter\mr@n\expandafter:\expandafter=\mr@used\do{\expandafter\mr@load\expandafter{\mr@n}}\fi}
+
+% \mr@found: {style}{url} of a name, else {plain}{}: the first attached package
+% exporting it, else the first package the document uses
+\def\mr@resolve#1{\def\mr@found{{plain}{}}\ifcsname mr@K@#1\endcsname
+  \def\mr@key{#1}\let\mr@hit\relax\expandafter\mr@search\expandafter{\expandafter.\expandafter}\mr@path\@nil
+  \ifx\mr@hit\relax\ifmr@strict\else\expandafter\expandafter\expandafter\mr@first\csname mr@K@#1\endcsname\@nil\fi\fi
+  \ifx\mr@hit\relax\else\mr@found@in\mr@hit{#1}\fi\fi}
+\def\mr@search#1{\ifx\@nil#1\else\ifx\mr@hit\relax
+  \ifcsname mr@L@#1@\mr@key\endcsname\def\mr@hit{#1}\fi\fi\expandafter\mr@search\fi}
+% the first package, unless it only re-exports the name ('%>%' of dplyr)
+\def\mr@first#1#2\@nil{\def\mr@hit{#1}\expandafter\ifx\csname mr@L@#1@\mr@key\endcsname\mr@reexport
+  \ifx\relax#2\relax\else\mr@first#2\@nil\ifx\mr@hit\relax\def\mr@hit{#1}\fi\fi\fi}
+\def\mr@reexport{\mr@t{reexports}}
+% #1 package, #2 name: \mr@found if the package exports it
+\def\mr@found@in#1#2{\ifcsname mr@L@#1@#2\endcsname
+  \def\mr@t##1{\csname mr@url@\csname mr@scheme@#1\endcsname\endcsname{#1}{##1}}\let\mr@u\@firstofone
+  \edef\mr@found{{func}{\csname mr@L@#1@#2\endcsname}}\fi}
+\def\mr@resolve@in#1#2{\def\mr@found{{plain}{}}\mr@load{#1}\mr@found@in{#1}{#2}}
+
+% Words are looked up when listings detects keywords, i.e. as whole words and
+% never within strings or comments. A word is a name of R ('.' and '_' are
+% letters), and ':' is a letter too, so 'dplyr::filter' is one word.
+\lst@AddToHook{DetectKeywords}{\ifmr@active\ifmr@quiet\else\mr@tokenname
+  \ifcsname mr@K@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi
+  \ifcsname mr@user@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi
+  \expandafter\in@\expandafter:\expandafter{\mr@token}\ifin@\let\lst@thestyle\mr@keyword\fi\fi\fi}
+% #1 typeset word; \mr@token its name, \mr@role what the code around makes of it
+\def\mr@keyword#1{\ifx\mr@role\mr@role@flow\mr@flowlink{#1}\else\ifx\mr@role\mr@role@ext\mr@libraryword{#1}\else
+  \ifx\mr@role\mr@role@plain#1\else
+  \ifx\mr@role\mr@role@def\ifcsname mr@user@\mr@token\endcsname\expandafter\mr@linkword\expandafter{\mr@token}{#1}\else#1\fi\else
+  \expandafter\in@\expandafter:\expandafter{\mr@token}%
+  \ifin@\expandafter\mr@colons\mr@token\@nil\else
+  \ifx\mr@role\mr@role@pkg\mr@pkgname\mr@token\else
+  \expandafter\mr@linkword\expandafter{\mr@token}{#1}\fi\fi\fi\fi\fi\fi}
+\def\mr@role@flow{flow}\def\mr@role@ext{ext}
+\def\mr@role@plain{plain}\def\mr@role@pkg{pkg}\def\mr@role@def{def}\def\mr@role{}
+% #1 name, #2 typeset word
+\def\mr@linkword#1#2{\def\mr@token{#1}%
+  \ifcsname mr@user@#1\endcsname\mr@userlink{#2}\else
+  \mr@resolve{#1}\expandafter\mr@show\mr@found{#2}\fi}
+\def\mr@name#1{\mr@linkword{#1}{#1}}
+\def\mr@pkgname#1{\mr@load{#1}\ifcsname mr@scheme@#1\endcsname
+  \mr@show{pkg}{\mr@pkgurl{#1}}{#1}\else{\mr@style@pkg#1}\fi}
+% 'pkg::name' and 'pkg:::name' link into the package, other colons are the
+% operator ':' between names or numbers ('1:n', 'a:b'). \mr@parts: the parts as
+% \mr@P{name} and \mr@S{colons}; \mr@shape: P and S for each, as in 'PSP'
+\def\mr@colons#1\@nil{\def\mr@parts{}\def\mr@shape{}\def\mr@cur{}\def\mr@run{}%
+  \mr@map\mr@colchar{#1}\mr@colpart\mr@colsep
+  \ifx\mr@shape\mr@qualshape\expandafter\mr@qualified\mr@parts\else
+  \begingroup\let\mr@P\mr@flowpart\let\mr@S\mr@flowops\mr@parts\endgroup\fi}
+\def\mr@qualshape{PSP}
+\def\mr@colchar#1{\if:#1\mr@colpart\edef\mr@run{\mr@run:}\else\mr@colsep\edef\mr@cur{\mr@cur#1}\fi}
+\def\mr@colpart{\ifx\mr@cur\@empty\else\eappto\mr@parts{\noexpand\mr@P{\mr@cur}}\appto\mr@shape{P}\def\mr@cur{}\fi}
+\def\mr@colsep{\ifx\mr@run\@empty\else\eappto\mr@parts{\noexpand\mr@S{\mr@run}}\appto\mr@shape{S}\def\mr@run{}\fi}
+\def\mr@ops#1{\ifmr@operators\ifcsname mr@nsop@#1\endcsname
+  \mr@show{op}{\mrDocsRManual/base/html/ns-dblcolon.html}{#1}\else{\mr@style@op#1}\fi\else{\mr@style@op#1}\fi}
+\expandafter\let\csname mr@nsop@\detokenize{::}\endcsname\@empty
+\expandafter\let\csname mr@nsop@\detokenize{:::}\endcsname\@empty
+\edef\mr@two{\detokenize{::}}\edef\mr@three{\detokenize{:::}}
+\def\mr@qualified\mr@P#1\mr@S#2\mr@P#3{\def\mr@t{#2}\in@false
+  \ifx\mr@t\mr@two\in@true\fi\ifx\mr@t\mr@three\in@true\fi
+  \ifin@\mr@pkgname{#1}\mr@ops{#2}\mr@resolve@in{#1}{#3}\expandafter\mr@show\mr@found{#3}%
+  \else\mr@part{#1}\mr@ops{#2}\mr@part{#3}\fi}
+% with flowR, each part is looked up at its column
+\def\mr@flowpart#1{\ifx\mr@flowcol\relax\mr@part{#1}\else
+  \edef\mr@flowat{\the\mr@lstid @\the\numexpr\mr@line+1\relax @\mr@flowcol}%
+  \ifcsname mr@fl@\mr@flowat\endcsname\begingroup\def\mr@token{#1}\let\mr@role\@empty
+    \csname mr@fl@\mr@flowat\endcsname\ifx\mr@role\@empty\mr@part{#1}\else\mr@keyword{#1}\fi\endgroup
+  \else\mr@part{#1}\fi\mr@len{#1}\edef\mr@flowcol{\the\numexpr\mr@flowcol+\mr@out}\fi}
+\def\mr@flowops#1{\mr@ops{#1}\ifx\mr@flowcol\relax\else\mr@len{#1}\edef\mr@flowcol{\the\numexpr\mr@flowcol+\mr@out}\fi}
+\let\mr@flowcol\relax
+\def\mr@part#1{\mr@isnumber{#1}\ifin@{\xlstGetStyle{numbers}#1}\else\mr@name{#1}\fi}
+\def\mr@isnumber#1{\expandafter\mr@isnumber@\detokenize{#1}\@nil}
+\def\mr@isnumber@#1#2\@nil{\in@{#1}{0123456789}}
+
+% '%op%' names of the database and ligatures are literates; listings replaces
+% literates everywhere, so they skip strings and comments themselves.
+\def\mr@code#1#2{\lst@ifkeywords#1\else#2\fi}
+% #1 operator as a string
+\def\mr@op#1{\mr@map\mr@apart{#1}\let\mr@opchars\mr@out\mr@code
+  {\ifcsname mr@K@#1\endcsname\mr@resolve{#1}\else\def\mr@found{{plain}{}}\fi
+   \edef\mr@t{\@car#1\@nil}\ifx\mr@t\mr@percent\let\mr@shower\mr@show\else\let\mr@shower\mr@opshow\fi
+   \expandafter\mr@shower\mr@found{\ifmr@symbols\ifcsname mr@sym@#1\endcsname\mr@copyas{#1}{\csname mr@sym@#1\endcsname}%
+     \else\mr@ligature{#1}\fi\else\mr@ligature{#1}\fi}}
+  {\mr@opchars}}
+\def\mr@ligature#1{\ifmr@ligatures\ifcsname mr@lig@#1\endcsname
+     \mr@copyas{#1}{\csname mr@lig@#1\endcsname}\else\mr@opchars\fi\else\mr@opchars\fi}
+% an operator of R's syntax keeps its color, '%op%' is a function of a package
+\def\mr@opshow#1#2{\mr@show{plain}{#2}}
+\edef\mr@percent{\expandafter\@gobble\string\%}
+\def\mr@maxlen{0}
+% #1 operator as typed ('\%in\%'): registered once, shortest first
+\def\mr@addop#1{\mr@str{#1}\ifcsname mr@isop@\mr@out\endcsname\else\csgdef{mr@isop@\mr@out}{}%
+  \edef\mr@t{\noexpand\mr@op{\mr@out}}\mr@len{#1}%
+  \ifnum\mr@out>\mr@maxlen\relax\global\let\mr@maxlen\mr@out\fi
+  \ifcsname mr@ops@\mr@out\endcsname\else\csgdef{mr@ops@\mr@out}{}\fi
+  \csgappto{mr@ops@\mr@out}{{#1}}\csxappto{mr@ops@\mr@out}{{{\unexpanded\expandafter{\mr@t}}}{\mr@out}}\fi}
+\newcount\mr@cnt
+\def\mr@literates{\advance\mr@cnt\@ne
+  \ifcsname mr@ops@\the\mr@cnt\endcsname
+    \expandafter\expandafter\expandafter\xlst@lst@addToLiterate
+    \expandafter\expandafter\expandafter{\csname mr@ops@\the\mr@cnt\endcsname}\fi
+  \ifnum\mr@cnt<\mr@maxlen\relax\expandafter\mr@literates\fi}
+\newcommand*\mrOperators[1]{\forcsvlist\mr@addop{#1}}
+\newcommand*\mrLigature[2]{\mr@str{#1}\csgdef{mr@lig@\mr@out}{#2}\mr@addop{#1}}
+% a tight ligature moves its characters closer together, like the ligatures
+% of programming fonts, but keeps their width, so columns align
+\def\mrLigatureKern{.05em}
+\newcommand*\mrTightLigature[1]{\mr@map\mr@tighten{#1}\let\mr@disp\mr@out
+  \mr@map\mr@apart{#1}\let\mr@t\mr@out\mr@len{#1}%
+  \edef\mr@disp{\noexpand\mrLigature{\unexpanded{#1}}{\noexpand\ifmr@tight
+    \noexpand\makebox[\mr@out\noexpand\fontcharwd\noexpand\font`x]{\unexpanded\expandafter{\mr@disp}}%
+    \noexpand\else\unexpanded\expandafter{\mr@t}\noexpand\fi}}\mr@disp}
+\def\mr@last{}
+\def\mr@tighten#1{\edef\mr@out{\mr@out\ifx\mr@out\@empty\else
+  \if=#1\else\if=\mr@last\else\noexpand\kern-\noexpand\mrLigatureKern\fi\fi\fi#1}\def\mr@last{#1}}
+\mrLigature{==}{=\kern.1pt=}
+% \mrSymbol{op}{symbol}: with the option symbols, the operator is the symbol, as wide as its
+% characters and copied as them
+% the pipe: an open triangle at the height of the letters (amssymb, newpxmath, ...), else a
+% larger \triangleright
+\def\mr@pipe{\mathrel{\hbox{\large\ifdefined\vartriangleright$\vartriangleright$\else
+  \raisebox{.1ex}{$\triangleright$}\fi}}}
+\newcommand*\mrSymbol[2]{\mr@str{#1}\let\mr@t\mr@out\mr@len{#1}%
+  \expandafter\xdef\csname mr@sym@\mr@t\endcsname{\noexpand\makebox[\mr@out\noexpand\fontcharwd\noexpand\font`x]%
+    {\noexpand\ensuremath{\unexpanded{#2}}}}\mr@addop{#1}}
+\def\mrTightLigatures{<-,<<-,->,->>,|>,<=,>=,!=,\&\&,||}
+\@for\mr@t:=\mrTightLigatures\do{\expandafter\mrTightLigature\expandafter{\mr@t}}
+\mrSymbol{<-}{\leftarrow}\mrSymbol{<<-}{\Leftarrow}\mrSymbol{->}{\rightarrow}\mrSymbol{->>}{\Rightarrow}
+\mrSymbol{|>}{\mr@pipe}\mrSymbol{<=}{\leq}\mrSymbol{>=}{\geq}\mrSymbol{!=}{\neq}
+\mrSymbol{\&\&}{\land}\mrSymbol{||}{\lor}
+
+% \mr@role of the next word: plain after '$' and '@' (a column, a slot), and
+% for named arguments ('f(n = 1)'), which the last run found (aux file); pkg
+% for the package of 'library(pkg)', which attaches it as well
+\newcount\mr@lstid
+\newcount\mr@word % words of the listing
+\newcount\mr@depth % open parentheses
+\newcount\mr@line
+\newcount\mr@params % the depth of the parameters of 'function(...)', else 0
+\newif\ifmr@default % within the default of a parameter
+\def\mr@fnstate{0}  % 1 after 'function' and '\'
+\newif\ifmr@active
+\newif\ifmr@member
+\newif\ifmr@linestart
+\let\mr@lastword\relax
+\let\mr@pending\@empty % a name that '<-' would define
+\let\mr@rhs\@empty      % ... after '<-', waiting for 'function'
+\def\mr@libstate{0}     % 1 after 'library', 2 after 'library('
+\edef\mr@kwlibrary{\detokenize{library}}\edef\mr@kwrequire{\detokenize{require}}
+\edef\mr@kwfunction{\detokenize{function}}
+\lst@AddToHook{Output}{\global\mr@defherefalse\ifmr@active\mr@inroxygen\lst@ifkeywords
+  \ifmr@quiet\let\lst@thestyle\lst@currstyle\else\mr@outword\fi
+  \else\ifmr@roxygen\mr@tokenname\mr@roxyword\else\mr@stringword\fi\global\let\mr@lastword\relax\fi\fi}
+\def\mr@outword{\global\advance\mr@word\@ne
+  \let\mr@role\@empty\let\mr@flowhit\relax\let\mr@flowcol\relax
+  \ifcsname mr@flow@\the\mr@lstid\endcsname\mr@flowkey
+    \ifcsname mr@fl@\mr@flowat\endcsname\expandafter\let\expandafter\mr@flowhit\csname mr@fl@\mr@flowat\endcsname\fi\fi
+  \ifmr@member\let\mr@role\mr@role@plain\global\mr@memberfalse\fi
+  \ifcsname mr@arg@\the\mr@lstid @\the\mr@word\endcsname\let\mr@role\mr@role@plain\fi
+  \ifnum\mr@params>\z@\ifnum\mr@depth=\mr@params\ifmr@default\else\mr@paramdef\fi\fi\fi
+  \ifnum\mr@rassign=1 \gdef\mr@rassign{0}\ifnum\mr@depth=\z@\mr@localdef{var}\fi\fi
+  \ifx\mr@token\mr@kwfunction\gdef\mr@fnstate{1}\else\gdef\mr@fnstate{0}\fi
+  \ifx\mr@token\mr@kwassign\ifx\mr@role\@empty\gdef\mr@asgstate{1}\fi\fi
+  \ifcsname mr@getter@\mr@token\endcsname\ifx\mr@role\@empty\gdef\mr@asgstate{3}\fi\fi
+  \ifx\mr@token\mr@kwcharonly\ifx\mr@libword\@empty\else\ifnum\mr@depth=\mr@libdepth\relax
+    \mr@write{\string\mr@notpkg{\the\mr@lstid}{\mr@libword}}\fi\fi\fi
+  \ifnum\mr@libstate=2 \mr@libarg\fi
+  \gdef\mr@libstate{0}%
+  \ifx\mr@token\mr@kwlibrary\gdef\mr@libstate{1}\fi\ifx\mr@token\mr@kwrequire\gdef\mr@libstate{1}\fi
+  \xdef\mr@lastword{\the\mr@word}%
+  \ifx\mr@rhs\@empty\else\ifx\mr@token\mr@kwfunction\mr@rhsdef{user}\else\mr@rhsdef{var}\fi\fi
+  \ifx\mr@flowhit\relax\else\mr@flowhit\fi
+  \ifx\lst@currstyle\mr@backtickcs\ifx\mr@flowhit\relax\let\mr@role\mr@role@plain\let\lst@thestyle\lst@currstyle\fi
+    \global\mr@linestartfalse\gdef\mr@libstate{0}\fi
+  \ifmr@operators\ifx\lst@thestyle\mr@kwstyle\ifcsname mr@K@\mr@token\endcsname\let\lst@thestyle\mr@kwlink\fi\fi\fi
+  \ifmr@linestart\ifmr@defs\lst@ifdisplaystyle\ifnum\mr@depth=\z@
+    \expandafter\in@\expandafter:\expandafter{\mr@token}\ifin@\else\global\let\mr@pending\mr@token
+      \xdef\mr@pendingword{\the\mr@word}\mr@known
+      \ifnum\lst@pos=\z@\global\mr@indentedfalse\else\global\mr@indentedtrue\fi\fi\fi\fi\fi\fi
+  \global\mr@linestartfalse}
+% with the option operators, keywords link to R's help and keep their style
+\def\mr@kwstyle{\lst@keywordstyle}
+\def\mr@kwlink#1{\expandafter\mr@resolve\expandafter{\mr@token}\expandafter\mr@kwshow\mr@found{#1}}
+\def\mr@kwshow#1#2{\mr@show{kw}{#2}}
+\def\mr@style@kw{\lst@keywordstyle}
+% the package of 'library(pkg)', unless the last run found 'character.only'
+\def\mr@libarg{\xdef\mr@libword{\the\mr@word}\xdef\mr@libdepth{\the\mr@depth}%
+  \ifx\mr@flowhit\relax\else\expandafter\@gobbletwo\fi\@firstofone{%
+  \ifcsname mr@user@\mr@token\endcsname\else\ifcsname mr@notpkg@\the\mr@lstid @\the\mr@word\endcsname\else
+    \expandafter\mr@attach\expandafter{\mr@token}\expandafter\mr@usesaux\expandafter{\mr@token}%
+    \let\mr@role\mr@role@pkg\let\lst@thestyle\mr@keyword\fi\fi}}
+\let\mr@libword\@empty\def\mr@libdepth{0}
+% from the aux file: #1 listing, #2 word
+\def\mr@notpkg#1#2{\csgdef{mr@notpkg@#1@#2}{}}
+\edef\mr@kwassign{\detokenize{assign}}\edef\mr@kwcharonly{\detokenize{character.only}}
+\def\mr@rassign{0}\def\mr@asgstate{0}
+% #1 kind: the word is defined here, in a displayed listing
+\def\mr@localdef#1{\ifmr@defs\lst@ifdisplaystyle\mr@define{#1}\mr@known\let\mr@role\mr@role@def
+  \mr@defocc{\the\mr@word}\fi\fi}
+% a parameter only counts within its listing, and only if the listing does
+% not define the name otherwise (the last run knows)
+\def\mr@paramdef{\let\mr@role\mr@role@plain
+  \ifcsname mr@knownv@\mr@token @\the\mr@lstid\endcsname\else\mr@localdef{param}\fi}
+% flowR: \mr@flowat is block@line@column of the current word, \mr@fl@<at> what flowR knows of it
+\def\mr@flowkey{\edef\mr@flowcol{\the\mr@col}%
+  \edef\mr@flowat{\the\mr@lstid @\the\numexpr\mr@line+1\relax @\mr@flowcol}}
+\newcommand*\mrFlowBlocks[1]{\forcsvlist\mr@flowblock{#1}}
+\def\mr@flowblock#1{\csgdef{mr@flow@#1}{}}
+\newcommand*\mrFlowDef[2]{\csgdef{mr@fl@#1}{\mr@fl{#2}{#1}\let\mr@flowlink\mr@flowplace}}
+\newcommand*\mrFlowRef[3]{\csgdef{mr@fl@#1}{\mr@fl{#2}{#3}\let\mr@flowlink\mr@flowref}}
+\newcommand*\mrFlowExt[1]{\csgdef{mr@fl@#1}{\ifx\mr@role\mr@role@pkg\else\let\mr@role\mr@role@ext\fi}}
+\newcommand*\mrFlowArg[1]{\csgdef{mr@fl@#1}{\let\mr@role\mr@role@plain}}
+\newcommand*\mrFlowLine[2]{\csgdef{mr@fline@#1}{#2}}
+% #1 kind (fun, var, param), #2 the definition
+\def\mr@fl#1#2{\let\mr@role\mr@role@flow\def\mr@flowtarget{#2}\def\mr@flowstyle{\csname mr@style@\csname mr@flk@#1\endcsname\endcsname}%
+  \let\lst@thestyle\mr@keyword}
+\def\mr@flk@fun{user}\def\mr@flk@var{var}\def\mr@flk@param{param}
+\def\mr@flowanchor{\ifcsname mr@placed@f@\mr@flowtarget\endcsname\else\csgdef{mr@placed@f@\mr@flowtarget}{}%
+  \ifdefined\hypertarget\mr@target{mr.f.\mr@flowtarget}\fi\fi}
+\def\mr@flowplace#1{\mr@flowanchor{\colorlet{mr@plain}{.}\mr@flowstyle#1}}
+\def\mr@flowref#1{\mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.f.\mr@flowtarget}{\mr@underline{\mr@flowstyle#1}}}%
+  {{\mr@flowstyle#1}}}
+% the name of 'assign("name", ...)', within the string
+% a name in a string ('assign("x", ...)', 'get("x")') keeps the style of the string
+\def\mr@stringword{\ifcsname mr@flow@\the\mr@lstid\endcsname\mr@flowkey
+    \ifcsname mr@fl@\mr@flowat\endcsname\mr@tokenname\let\mr@role\@empty\let\mr@strstyle\lst@thestyle
+      \csname mr@fl@\mr@flowat\endcsname
+      \ifx\mr@role\mr@role@flow\let\lst@thestyle\mr@strflow\else\let\lst@thestyle\mr@strstyle\fi\fi
+  \else\mr@stringword@\fi}
+\def\mr@strflow#1{\ifx\mr@flowlink\mr@flowplace\mr@flowanchor\mr@strstyle{#1}\else
+  \mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.f.\mr@flowtarget}{\mr@underline{\mr@strstyle{#1}}}}%
+  {\mr@strstyle{#1}}\fi}
+\def\mr@stringword@{\ifnum\mr@asgstate=2 \gdef\mr@asgstate{0}\mr@tokenname\let\mr@role\@empty
+  \mr@localdef{var}\ifmr@defhere\let\mr@strstyle\lst@thestyle\let\lst@thestyle\mr@strdef\fi\fi
+  \ifnum\mr@asgstate=4 \gdef\mr@asgstate{0}\mr@tokenname
+    \ifcsname mr@user@\mr@token\endcsname\let\mr@strstyle\lst@thestyle\let\lst@thestyle\mr@strlink\fi\fi}
+% 'get("x")', 'get0("x")', 'exists("x")': the string links to the definition of x
+\@namedef{mr@getter@get}{}\@namedef{mr@getter@get0}{}\@namedef{mr@getter@exists}{}
+\def\mr@strlink#1{\begingroup\def\mr@style@var{\mr@strstyle}\let\mr@style@user\mr@style@var
+  \let\mr@style@local\mr@style@var\let\mr@style@param\mr@style@var\mr@userlink{#1}\endgroup}
+\def\mr@strdef#1{\ifcsname mr@placed@\the\mr@lstid @\mr@token\endcsname\else
+  \csgdef{mr@placed@\the\mr@lstid @\mr@token}{}\ifdefined\hypertarget\mr@target{mr.\the\mr@lstid.\mr@token}\fi\fi
+  \mr@strstyle{#1}}
+% roxygen: '@tag' and the name after '@param' stand out, 'pkg::name' links
+\newif\ifmr@roxygen\newif\ifmr@quiet
+\def\mr@roxygen{\lst@commentstyle}% the style of the comment '#'', which marks it
+\def\mr@roxycs{\mr@roxygen}
+% a backtick name ('`my var`') is one name: its words link only through flowR, define nothing
+% without it, and look like names
+\def\mr@backtick{}\def\mr@backtickcs{\mr@backtick}
+\def\mr@inroxygen{\ifx\lst@currstyle\mr@roxycs\mr@roxygentrue\else\mr@roxygenfalse\fi}
+\def\mr@quietline{\mr@quiettrue}
+\def\mr@style@tag{\xlstGetStyle{keywordA}}
+\def\mr@style@tagarg{\xlstGetStyle{keywordC}}
+\edef\mr@kwparam{\detokenize{param}}\def\mr@roxyparam{0}
+% within a comment, '@param' is one word
+\def\mr@roxyword{\expandafter\mr@roxyword@\mr@token\@nil}
+\def\mr@roxyword@#1#2\@nil{\edef\mr@t{#1}\ifx\mr@t\mr@at\let\lst@thestyle\mr@style@tag
+    \edef\mr@t{#2}\ifx\mr@t\mr@kwparam\gdef\mr@roxyparam{1}\fi
+  \else\ifnum\mr@roxyparam=1 \gdef\mr@roxyparam{0}\let\lst@thestyle\mr@style@tagarg
+  \else\expandafter\in@\expandafter:\expandafter{\mr@token}%
+    \ifin@\let\mr@role\@empty\let\lst@thestyle\mr@keyword\fi\fi\fi}
+\edef\mr@dollar{\detokenize{$}}\edef\mr@at{\detokenize{@}}
+\edef\mr@eq{\detokenize{=}}\edef\mr@lpar{\detokenize{(}}\edef\mr@rpar{\detokenize{)}}
+\edef\mr@quote{\string"}\edef\mr@squote{\string'}
+\edef\mr@backslash{\expandafter\@gobble\string\\}\edef\mr@comma{\detokenize{,}}
+\edef\mr@assign{\detokenize{=}}
+% the other characters of the code, one at a time; a literate is one operator,
+% known by its text ('{\mr@op {<-}}')
+\lst@AddToHook{OutputOther}{\ifmr@active\mr@inroxygen\lst@ifkeywords\ifmr@quiet\else
+  \edef\mr@t{\detokenize\expandafter{\the\lst@token}}\expandafter\mr@isbraced\mr@t\relax\@nil
+  \ifin@\expandafter\mr@literal\expandafter{\mr@t}\else
+    \begingroup\mr@plain\let\lst@outputspace\@empty\edef\mr@t{\the\lst@token}\edef\mr@t{\mr@t}%
+    \edef\mr@t{\detokenize\expandafter{\mr@t}}\expandafter\endgroup\expandafter\mr@others\mr@t\@nil
+  \fi\fi\fi\fi}
+\def\mr@isbraced#1#2\@nil{\edef\mr@c{#1}\ifx\mr@c\mr@lbrace\in@true\else\in@false\fi}
+\edef\mr@lbrace{\expandafter\@gobble\string\{}
+\edef\mr@assignraw{\detokenize{{\mr@op{<-}},{\mr@op{<<-}}}}
+\edef\mr@rassignraw{\detokenize{{\mr@op{->}},{\mr@op{->>}}}}
+\edef\mr@promptraw{\detokenize{\mr@nocopy}}
+\def\mr@literal#1{\expandafter\in@\expandafter{\mr@promptraw}{#1}\ifin@\else\mr@literal@{#1}\fi}
+\def\mr@literal@#1{\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi
+  \edef\mr@t{\noexpand\in@{,#1,}{,\mr@rassignraw,}}\mr@t\ifin@\gdef\mr@rassign{1}\else\gdef\mr@rassign{0}\fi
+  \gdef\mr@asgstate{0}%
+  \edef\mr@t{\noexpand\in@{,#1,}{,\mr@assignraw,}}\mr@t
+  \ifin@\ifx\mr@pending\@empty\else\global\let\mr@rhs\mr@pending\fi\fi
+  \global\let\mr@pending\@empty\gdef\mr@libstate{0}\global\let\mr@lastword\relax\global\mr@linestartfalse}
+\def\mr@others#1\@nil{\ifx\relax#1\relax\else\mr@others@#1\@nil\fi}
+\def\mr@others@#1#2\@nil{\mr@other{#1}{#2}}
+\def\mr@other#1#2{\edef\mr@c{#1}\gdef\mr@rassign{0}%
+    \ifnum\mr@asgstate=1 \ifx\mr@c\mr@lpar\gdef\mr@asgstate{2}\else\gdef\mr@asgstate{0}\fi
+    \else\ifnum\mr@asgstate=3 \ifx\mr@c\mr@lpar\gdef\mr@asgstate{4}\else\gdef\mr@asgstate{0}\fi
+    \else\ifnum\mr@asgstate>1 \ifx\mr@c\mr@quote\else\ifx\mr@c\mr@squote\else\gdef\mr@asgstate{0}\fi\fi\fi\fi\fi
+    \ifx\mr@rhs\@empty\else\ifx\mr@c\mr@backslash\mr@rhsdef{user}\else\mr@rhsdef{var}\fi\fi
+    \mr@assignment{#1}%
+    \ifx\mr@c\mr@lpar\global\advance\mr@depth\@ne\ifnum\mr@libstate=1 \gdef\mr@libstate{2}\fi\else
+      \gdef\mr@libstate{0}\fi
+    \ifx\mr@c\mr@rpar\ifnum\mr@depth>\z@\global\advance\mr@depth\m@ne\fi
+      \ifx\mr@libword\@empty\else\ifnum\mr@depth<\mr@libdepth\relax\global\let\mr@libword\@empty\fi\fi
+      \ifnum\mr@depth<\mr@params\global\mr@params\z@\fi\fi
+    \ifnum\mr@params>\z@\ifnum\mr@depth=\mr@params
+      \ifx\mr@c\mr@eq\global\mr@defaulttrue\fi\ifx\mr@c\mr@comma\global\mr@defaultfalse\fi\fi\fi
+    \ifnum\mr@fnstate=1 \ifx\mr@c\mr@lpar\global\mr@params\mr@depth\global\mr@defaultfalse\fi\fi
+    \ifx\mr@c\mr@backslash\gdef\mr@fnstate{1}\else\gdef\mr@fnstate{0}\fi
+    \ifx\mr@c\mr@dollar\global\mr@membertrue\fi
+    \ifx\mr@c\mr@at\global\mr@membertrue\fi
+    \ifx\mr@c\mr@eq\mr@namedarg{#2}\fi
+    \global\let\mr@lastword\relax\global\mr@linestartfalse
+  \ifx\relax#2\relax\else\mr@others#2\@nil\fi}
+% '=' (not '==') after a word within parentheses names an argument
+\def\mr@namedarg#1{\ifnum\mr@depth>\z@\ifx\mr@lastword\relax\else
+  \mr@namedarg@#1\relax\@nil\fi\fi}
+\def\mr@namedarg@#1#2\@nil{\if=#1\else\mr@write{\string\mr@argument{\the\mr@lstid}{\mr@lastword}}\fi}
+% from the aux file: #1 listing, #2 word
+\def\mr@argument#1#2{\csgdef{mr@arg@#1@#2}{}}
+
+% In a displayed listing, a name that starts a line is defined once '<-',
+% '<<-', or '=' follows: a function if 'function' or '\(' comes next, else a
+% variable; an indented one only within its listing. Definitions go to the
+% aux file, so from the next run on every use links to the definition in the
+% same listing, else the last one before, else the first one after.
+\newif\ifmr@defs
+\newif\ifmr@defhere
+\newif\ifmr@userrerun
+\newif\ifmr@private
+\newif\ifmr@indented
+\def\mr@kind@local{local}\def\mr@kind@param{param}
+\def\mr@setdefs#1{\lstKV@SetIf{#1}\ifmr@defs}
+\lst@Key{mrdefinitions}{true}[t]{\def\mr@t{#1}\ifx\mr@t\mr@kind@local
+  \mr@defstrue\mr@privatetrue\else\mr@privatefalse\mr@setdefs{#1}\fi}
+% #1 the first operator of a token: '<-' etc. after a pending name
+\def\mr@assignment#1{\ifx\mr@pending\@empty\else
+  \edef\mr@t{\noexpand\in@{,#1,}{,\mr@assign,}}\mr@t
+  \ifin@\global\let\mr@rhs\mr@pending\fi\global\let\mr@pending\@empty\fi}
+% #1 kind of the name in \mr@rhs
+\def\mr@rhsdef#1{{\let\mr@token\mr@rhs\ifmr@indented\mr@define{local}\else\mr@define{#1}\fi
+  \mr@defocc\mr@pendingword}%
+  \global\let\mr@rhs\@empty}
+\lst@AddToHook{EOL}{\global\let\mr@pending\@empty\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi
+  \global\mr@linestarttrue\global\let\mr@lastword\relax\global\mr@memberfalse\gdef\mr@libstate{0}%
+  \global\advance\mr@line\@ne\ifcsname mr@loads@\the\mr@lstid @\the\mr@line\endcsname
+  \csname mr@loads@\the\mr@lstid @\the\mr@line\endcsname\fi}
+% a target if the last run defined the name here
+\def\mr@known{\ifcsname mr@known@\mr@token @\the\mr@lstid\endcsname\global\mr@defheretrue\fi}
+% #1 kind of \mr@token; a name with several definitions is defined once. The
+% write is not immediate: code in a box that is never shipped out (beamer's
+% \only on another overlay) defines nothing
+\def\mr@define#1{\def\mr@t{#1}\ifx\mr@t\mr@kind@param\def\mr@t{p}\else\let\mr@t\@empty\fi
+  \ifcsname mr@seen\mr@t @\mr@token @\the\mr@lstid\endcsname\else
+  \csgdef{mr@seen\mr@t @\mr@token @\the\mr@lstid}{}%
+  \mr@write{\string\mr@definition{\mr@token}{\the\mr@lstid}{#1}{\mr@group}}\fi}
+\def\mr@write#1{\if@filesw\edef\mr@t{\noexpand\mr@write@\@auxout{#1}}\mr@t\fi}
+\let\mr@write@\write
+\def\mr@usesaux#1{\if@filesw\immediate\write\@auxout{\string\mr@uses{#1}}\fi}
+% beamer typesets a frame once per overlay, each time as a listing of its own;
+% the overlays of a frame form a group; the group -1 marks a listing whose
+% definitions only count within it
+\def\mr@group{\ifmr@private-1\else\ifdefined\beamer@slideinframe\the\c@framenumber
+  \else\the\mr@lstid\fi\fi}
+% from the aux file: #1 name, #2 listing, #3 kind, #4 group
+\def\mr@definition#1#2#3#4{\edef\mr@t{\detokenize{#1}}%
+  \csxappto{mr@user@\mr@t}{{#2}{#3}{#4}}\csgdef{mr@known@\mr@t @#2}{}%
+  \def\mr@n{#3}\ifx\mr@n\mr@kind@param\else\csgdef{mr@knownv@\mr@t @#2}{}\fi}
+% so that the aux file still works without the package
+\AtBeginDocument{\if@filesw\immediate\write\@auxout{\string\providecommand\string\mr@definition[4]{}%
+  \string\providecommand\string\mr@argument[2]{}\string\providecommand\string\mr@notpkg[2]{}\string\providecommand\string\mr@uses[1]{}}\fi}
+% a definition the last run did not know asks for a rerun, found when LaTeX
+% reads the aux file again at the end
+\AtEndDocument{\def\mr@definition#1#2#3#4{%
+  \ifcsname mr@known@\detokenize{#1}@#2\endcsname\else\global\mr@userreruntrue\fi}%
+  \def\mr@argument#1#2{\ifcsname mr@arg@#1@#2\endcsname\else\global\mr@userreruntrue\fi}%
+  \def\mr@notpkg#1#2{\ifcsname mr@notpkg@#1@#2\endcsname\else\global\mr@userreruntrue\fi}%
+  \let\mr@uses\@gobble}
+\AddToHook{enddocument/info}{\ifmr@userrerun\PackageWarningNoLine{magic-r}{The definitions
+  of the document changed. Rerun to get cross-references right}\fi}
+% #1 typeset word, the name is \mr@token
+\def\mr@userlink#1{\let\mr@exact\relax\let\mr@below\relax\let\mr@firstdef\relax
+  \expandafter\expandafter\expandafter\mr@scan\csname mr@user@\mr@token\endcsname\@nil\@nil\@nil
+  \ifx\mr@exact\relax\ifx\mr@below\relax\let\mr@exact\mr@firstdef\else\let\mr@exact\mr@below\fi\fi
+  \ifx\mr@exact\relax\let\mr@t\mr@libraryword\else\edef\mr@t{\noexpand\mr@userlink@\mr@exact}\fi
+  \mr@t{#1}}
+% a name defined only locally elsewhere: as if the document did not define it
+\def\mr@libraryword#1{\expandafter\mr@resolve\expandafter{\mr@token}\expandafter\mr@show\mr@found{#1}}
+% #1 listing, #2 kind, #3 group; local definitions only count in their
+% listing, the first definition is the last one of its group (the last
+% overlay of a beamer frame, where all of it is visible)
+\def\mr@scan#1#2#3{\ifx\@nil#1\else
+  \ifnum#1=\mr@lstid\def\mr@t{#2}\ifx\mr@t\mr@kind@param\ifx\mr@exact\relax\def\mr@exact{{#1}{#2}}\fi
+    \else\def\mr@exact{{#1}{#2}}\fi\fi
+  \def\mr@t{#2}\ifx\mr@t\mr@kind@local\else\ifx\mr@t\mr@kind@param\else\ifnum#3<\z@\else
+    \ifx\mr@firstdef\relax\def\mr@firstdef{{#1}{#2}}\def\mr@firstgroup{#3}\else
+      \ifnum#3=\mr@firstgroup\relax\def\mr@firstdef{{#1}{#2}}\fi\fi
+    \ifnum#1<\mr@lstid\def\mr@below{{#1}{#2}}\fi
+  \fi\fi\fi
+  \expandafter\mr@scan\fi}
+\let\mr@style@local\mr@style@var
+% parameters in a shade of the color of packages, at their definition and every use
+\AtBeginDocument{\colorlet{mrparam}{xlst@colors@lst@keywordB!65!black}}
+\def\mr@style@param{\color{mrparam}}
+% a target one line above the baseline: viewers put it at the top of the
+% window, so the whole line of the definition stays visible
+\def\mr@target#1{\smash{\raise\dimexpr\ht\strutbox+\dp\strutbox\relax\hbox{\hypertarget{#1}{}}}}
+% #1 listing, #2 kind, #3 typeset word; the first binding is the target
+\def\mr@userlink@#1#2#3{\in@false
+  \ifmr@defhere\ifnum#1=\mr@lstid\ifcsname mr@placed@#1@\mr@token\endcsname\else\in@true\fi\fi\fi
+  \ifin@\csgdef{mr@placed@#1@\mr@token}{}%
+    \ifdefined\hypertarget\mr@target{mr.#1.\mr@token}\fi{\colorlet{mr@plain}{.}\csname mr@style@#2\endcsname#3}%
+  \else\mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.#1.\mr@token}{\mr@underline{\csname mr@style@#2\endcsname#3}}}%
+  {{\csname mr@style@#2\endcsname#3}}\fi}
+
+% |warn|, |err|, and |info| put a soft band behind every token they span,
+% even over several lines, and keep the colors and links of the tokens
+\definecolor{mrwarning}{HTML}{DF8E1D}
+\definecolor{mrerror}{HTML}{D20F39}
+\definecolor{mrinfo}{HTML}{1E66F5}
+\let\mr@marking\@empty\let\mr@markcolor\@empty
+\def\mr@startmark#1{\def\mr@marking{#1}}
+\def\mr@markall{\ifx\mr@marking\@empty\let\mr@markcolor\@empty\else\let\mr@markcolor\mr@marking\fi
+  \ifx\mr@markcolor\@empty\else\let\mr@markedstyle\lst@thestyle\let\lst@thestyle\mr@mark\fi}
+\newbox\mr@markbox
+\def\mr@mark#1{\setbox\mr@markbox\hbox{\begingroup\mr@underlinefalse\mr@markedstyle{#1}\endgroup}%
+  \rlap{\color{\mr@markcolor!16}\rule[-\dp\strutbox]{\wd\mr@markbox}{\dimexpr\ht\strutbox+\dp\strutbox}}%
+  \rlap{\color{\mr@markcolor!70}\rule[-\dp\strutbox]{\wd\mr@markbox}{.6pt}}%
+  \box\mr@markbox}
+\lst@AddToHook{Output}{\mr@markall}
+\lst@AddToHook{OutputOther}{\mr@markall}
+
+\lst@Key{magic-r}\relax[t]{\global\advance\mr@lstid\@ne\global\mr@word\z@\global\mr@depth\z@\global\mr@params\z@
+  \global\mr@line\z@\global\let\mr@pending\@empty\global\let\mr@rhs\@empty\gdef\mr@libstate{0}%
+  \global\mr@linestarttrue\global\let\mr@lastword\relax\global\mr@memberfalse
+  \gdef\mr@rassign{0}\gdef\mr@asgstate{0}\global\let\mr@libword\@empty\global\let\mr@lastmark\@empty
+  \gdef\mr@linemark{}%
+  \mr@activetrue\mr@begin}
+\let\mr@begin\relax % the capture for flowR
+\let\mr@readflowr\relax
+% spaces as wide as the characters of the font, so indentation aligns
+% spaces as wide as the characters of the font in displayed code, so indentation aligns (inline
+% code starts in the font of the text, whose 'x' would make it too wide)
+\lst@AddToHook{InitVars}{\ifmr@active\lst@ifdisplaystyle\lst@width\fontcharwd\font`x\relax\fi
+  \mr@cnt\z@\mr@literates\fi}
+% xlistings makes every digit a literate that starts a number; within a word
+% ('log10', 'x2') a digit continues the word instead
+\def\mr@worddigit#1{\expandafter\mr@worddigit@\csname mr@digit@#1\endcsname#1}
+\def\mr@worddigit@#1#2{\lst@DefSaveDef{`#2}#1{\let\mr@next\@secondoftwo
+  \lst@ifletter\ifxlst@lst@lastwas@character@\let\mr@next\@firstoftwo\fi\fi
+  \mr@next{\lst@ProcessDigit#2}#1}}
+\lst@AddToHook{SelectCharTable}{\ifmr@active\mr@worddigit0\mr@worddigit1\mr@worddigit2%
+  \mr@worddigit3\mr@worddigit4\mr@worddigit5\mr@worddigit6\mr@worddigit7\mr@worddigit8%
+  \mr@worddigit9\fi}
+% breaklines makes ')' a place to break, which hides the closing delimiters of
+% raw strings (')"'): the char table of R is built without it
+\def\mr@nobreaks{\let\mr@breaklines\lst@ifbreaklines\let\lst@ifbreaklines\iffalse}
+\def\mr@breaks{\let\lst@ifbreaklines\mr@breaklines}
+\lst@AddToHookAtTop{SelectCharTable}{\ifmr@active\mr@nobreaks\fi}
+\lst@AddToHook{SelectCharTable}{\ifmr@active\mr@breaks\fi}
+\lst@Key{attach}\relax{\mrAttach{#1}}
+\def\mrLinksOn{\mr@linkstrue}          \def\mrLinksOff{\mr@linksfalse}
+\def\mrLocalLinksOn{\mr@locallinkstrue} \def\mrLocalLinksOff{\mr@locallinksfalse}
+% the keys mrlinks and mrlocallinks: no links at all in a listing, or none to the definitions of the
+% document (an interactive listing has none of these, unless the key asks for them: a click on a
+% name shows or hides its arrows)
+\let\mr@locallinkskey\@empty
+\lst@Key{mrlinks}\relax[true]{\lstKV@SetIf{#1}\ifmr@links}
+\lst@Key{mrlocallinks}\relax[true]{\def\mr@locallinkskey{#1}\lstKV@SetIf{#1}\ifmr@locallinks}
+% #1 if a name links to its definition in the document, else #2
+\def\mr@iflocal{\let\mr@lt\@secondoftwo\ifmr@links\ifmr@locallinks\let\mr@lt\@firstoftwo\fi\fi\mr@lt}
+\def\mrLigaturesOn{\mr@ligaturestrue}  \def\mrLigaturesOff{\mr@ligaturesfalse}
+\def\mrTightOn{\mr@tighttrue}          \def\mrTightOff{\mr@tightfalse}
+\def\mrUnderlineOn{\mr@underlinetrue}  \def\mrUnderlineOff{\mr@underlinefalse}
+\newif\ifmr@capture
+\lst@Key{mrcapture}{true}[t]{\lstKV@SetIf{#1}\ifmr@capture}
+
+\lstdefinelanguage{lMagicR}{
+  keywords={if,else,repeat,while,function,for,in,next,break,TRUE,FALSE,NULL,
+    Inf,NaN,NA,NA_integer_,NA_real_,NA_character_,NA_complex_},
+  sensitive=true,
+  alsoletter={._:},
+  number suffixes={eEiL},
+  moredelim=[s][\mr@backtick]{`}{`},
+  morecomment=[l]\#,
+  morecomment=[l][\mr@roxygen]{\#'},
+  % raw strings: r"(...)", r'[...]', R"-{...}-", up to two dashes
+  morestring=[s]{r"(}{)"},morestring=[s]{r"-(}{)-"},morestring=[s]{r"--(}{)--"},morestring=[s]{r"[}{]"},
+  morestring=[s]{r"-[}{]-"},morestring=[s]{r"--[}{]--"},morestring=[s]{r"\{}{\}"},morestring=[s]{r"-\{}{\}-"},
+  morestring=[s]{r"--\{}{\}--"},morestring=[s]{R"(}{)"},morestring=[s]{R"-(}{)-"},morestring=[s]{R"--(}{)--"},
+  morestring=[s]{R"[}{]"},morestring=[s]{R"-[}{]-"},morestring=[s]{R"--[}{]--"},morestring=[s]{R"\{}{\}"},
+  morestring=[s]{R"-\{}{\}-"},morestring=[s]{R"--\{}{\}--"},morestring=[s]{r'(}{)'},morestring=[s]{r'-(}{)-'},
+  morestring=[s]{r'--(}{)--'},morestring=[s]{r'[}{]'},morestring=[s]{r'-[}{]-'},morestring=[s]{r'--[}{]--'},
+  morestring=[s]{r'\{}{\}'},morestring=[s]{r'-\{}{\}-'},morestring=[s]{r'--\{}{\}--'},morestring=[s]{R'(}{)'},
+  morestring=[s]{R'-(}{)-'},morestring=[s]{R'--(}{)--'},morestring=[s]{R'[}{]'},morestring=[s]{R'-[}{]-'},
+  morestring=[s]{R'--[}{]--'},morestring=[s]{R'\{}{\}'},morestring=[s]{R'-\{}{\}-'},morestring=[s]{R'--\{}{\}--'},
+  morestring=[b]",
+  morestring=[b]',
+  moredelim=**[is][{\mr@startmark{mrwarning}}]{|warn|}{|warn|},
+  moredelim=**[is][{\mr@startmark{mrerror}}]{|err|}{|err|},
+  moredelim=**[is][{\mr@startmark{mrinfo}}]{|info|}{|info|},
+  moredelim=[is][{}]{|plain|}{|plain|},
+  moredelim=[is][{\color{lightgray}}]{|dim|}{|dim|},
+  escapeinside={!*}{*!},
+  escapebegin=\mr@escgrab,
+  add to literate={:...:}{{{\textcolor{gray}{\ldots}}}}1,
+  magic-r
+}
+\ifmr@operators\AtBeginDocument{%
+  \def\mr@oplink#1#2{\edef\mr@u{\mrDocsRManual/base/html/#1.html}\expandafter\mrAddLink\expandafter{\mr@u}{#2}}%
+  \mr@oplink{assignOps}{<-,<<-,->,->>}\mr@oplink{pipeOp}{|>}\mr@oplink{Comparison}{==,!=,<=,>=}%
+  \mr@oplink{Logic}{\&\&,||}\mr@oplink{Control}{if,else,for,while,repeat,break,next}%
+  \mr@oplink{function}{function}\mr@oplink{logical}{TRUE,FALSE}\mr@oplink{NULL}{NULL}%
+  \mr@oplink{NA}{NA,NA_integer_,NA_real_,NA_character_,NA_complex_}\mr@oplink{is.finite}{Inf,NaN}}\fi
+% the R console: ':prompt:' and ':cont:' start the lines of an input, their
+% prompts do not copy; ':out:' starts a line of output, which is plain
+\lstdefinelanguage{lRConsole}{
+  language=lMagicR,
+  mrdefinitions=local,
+  mrcapture=false,
+  moredelim=[il][\mr@quietline]{:out:},
+  add to literate={:prompt:}{{{\mr@nocopy{\mrPrompt{>}\ }}}}2 {:cont:}{{{\mr@nocopy{\mrPrompt{+}\ }}}}2
+}
+\edef\mr@t{\noexpand\RegisterLanguage[magic-r]{\mrLanguage}{lMagicR}}\mr@t
+\RegisterLanguage{rconsole}{lRConsole}
+% the environments follow the style of xlistings ('style={plain number}'),
+% which xlistings itself only applies to its emulation of minted;
+% \mr@restyle{env}{language} does so for an environment of another language
+\def\mr@restyle#1#2{\begingroup\let\PackageWarning\@gobbletwo\edef\environName{\xlst@style@default}%
+  \pgfkeysifdefined{/xlst@lst@family/\environName/listing style}
+    {\xlst@@NewLstEnv{\environName}{#2}{#1}{#1}}{}\endgroup}
+\def\mr@t{default}\ifx\mr@t\xlst@style@default\else
+  \expandafter\mr@restyle\expandafter{\mrLanguage}{lMagicR}\mr@restyle{rconsole}{lRConsole}\fi
+% inline code reads its argument verbatim (but for the braces), so '%', '#',
+% '$', and '\' need no escape; within the argument of another command the
+% characters are read already, and '\%', '\#', ... still work there
+\def\mr@verbatim{\begingroup\let\do\@makeother\do\%\do\#\do\$\do\&\do\^\do\_\do\~\do\\%
+  \catcode`\^^M=10 \mr@verbatim@}
+\def\mr@verbatim@#1{\@ifnextchar[{\mr@verbatim@o#1}{\mr@verbatim@o#1[]}}
+% no thin space of xlistings before the code right after a character, as in '(\bmr{x})'
+\def\mr@verbatim@o#1[#2]#3{\endgroup\ifnum\lastnodetype=\z@{\let\xlst@inline@lead\relax
+  \let\xlst@inline@lead@prepare\relax#1[#2]{#3}}\else#1[#2]{#3}\fi}
+\def\mr@t#1{\expandafter\let\csname mr@inline@#1\expandafter\endcsname\csname#1\mrLanguage\endcsname
+  \expandafter\protected\expandafter\edef\csname#1\mrLanguage\endcsname{\noexpand\mr@verbatim
+    \expandafter\noexpand\csname mr@inline@#1\endcsname}}
+\mr@t c\mr@t b\mr@t i
+
+% the colors of the graphs: definitions, calls, values; gray with the option graphs-gray
+\def\mr@graphcolors{\csname ifmr@graphs-gray\endcsname
+  \colorlet{mrg-def}{black!80}\colorlet{mrg-call}{black!60}\colorlet{mrg-value}{black!45}\else
+  \colorlet{mrg-def}{xlst@colors@lst@keywordB}\colorlet{mrg-call}{xlst@colors@lst@keywordA}%
+  \colorlet{mrg-value}{xlst@colors@lst@literals}\fi}
+\AtBeginDocument{\mr@graphcolors}
+% the graphs of flowR: nodes at the places the script computed, then the edges
+\ifmr@playground\mr@graphstrue\fi% the button is drawn with TikZ
+% arrows that a click shows or hides (optional content): every listing with interactive=all
+\newif\ifmr@interall
+\ifx\mr@interactive\@empty\else\mr@graphstrue\RequirePackage{ocgx2}\fi
+\def\mr@t{all}\ifx\mr@interactive\mr@t\mr@interalltrue\fi
+\ifmr@graphs\RequirePackage{tikz}\usetikzlibrary{arrows.meta,calc,shapes.misc,fit,backgrounds}
+\tikzset{mr graph/.style={font=\ttfamily\scriptsize,>={Kite[length=3.4pt,width=2.8pt]},line cap=round,
+    baseline=(current bounding box.center)},
+  mr node/.style={draw=gray!45,fill=white,inner xsep=3pt,inner ysep=2pt,
+    minimum height=1.45em,align=left,line width=.5pt},
+  % the shapes of flowR's mermaid graphs: definitions are rectangles, uses stadiums, values
+  % hexagons, and calls rectangles with bars at their sides
+  mr vdef/.style={draw=mrg-def!75,fill=mrg-def!9},
+  mr use/.style={rounded rectangle,fill=gray!5},
+  mr value/.style={chamfered rectangle,chamfered rectangle xsep=2cm,chamfered rectangle angle=30,
+    draw=mrg-value!45,fill=mrg-value!7,text=mrg-value!80!black},
+  mr fcall/.style={draw=mrg-call!60,fill=mrg-call!6,inner xsep=5pt},
+  mr fcall bars/.style={draw=mrg-call!60,line width=.4pt},
+  mr fdef/.style={dashed,draw=mrg-call!70},
+  % the call graph: the top level, the functions of the code, and those of R
+  mr cgmain/.style={rounded rectangle,draw=mrg-def!75,line width=.8pt,fill=gray!4},
+  mr cgfun/.style={mr vdef},
+  mr cgbuiltin/.style={rounded rectangle,draw=gray!45,fill=gray!5,text=gray!75!black},
+  mr block/.style={sharp corners,fill=gray!4,font=\ttfamily\scriptsize},
+  % in the control flow graph, the entry and the exits are stadiums and conditions hexagons, as in
+  % flow charts
+  mr entry/.style={mr block,rounded rectangle,draw=mrg-def!75,line width=.8pt},
+  mr exit/.style={mr block,rounded rectangle,draw=mrg-call!70,line width=.8pt},
+  mr branch/.style={mr block,chamfered rectangle,chamfered rectangle xsep=2cm,chamfered rectangle angle=40,
+    draw=gray!60},
+  mr edge/.style={->,draw=gray!65,line width=.45pt,shorten >=.5pt},
+  mr reads/.style={}, mr definedBy/.style={draw=mrg-def!60},
+  mr calls/.style={draw=mrg-call!70,line width=.6pt}, mr returns/.style={densely dashed},
+  mr argument/.style={densely dotted,draw=gray!50},
+  mr flow/.style={}, mr cond/.style={}, mr back/.style={densely dashed},
+  mr edge label/.style={font=\ttfamily\tiny,fill=white,inner sep=.6pt,outer sep=.6pt},
+  mr group/.style={draw=gray!35,fill=gray!3,rounded corners=4pt,inner sep=7pt},
+  mr group label/.style={font=\ttfamily\tiny,text=gray!70!black,inner sep=2pt},
+  mr legend/.style={draw=gray!35,fill=gray!4,rounded corners=3pt,inner sep=3pt,font=\ttfamily\tiny,
+    align=left}}
+\fi
+% #3 the legend (dataflow graphs): what the shapes and the edges of the graph mean
+\def\mr@drawgraph#1#2#3{\begin{tikzpicture}[mr graph,#1]\mr@glreset#2#3\end{tikzpicture}}
+\def\mr@glkinds{vdef,fdef,use,value,fcall,entry,block,branch,exit,cgmain,cgfun,cgbuiltin}
+\def\mr@gledges{reads,definedBy,calls,returns,argument,flow,cond,back}
+\def\mr@glreset{\edef\mr@t{\mr@glkinds,\mr@gledges}%
+  \@for\mr@t:=\mr@t\do{\global\expandafter\let\csname mr@gl@\mr@t\endcsname\relax}}
+\def\mr@glname@vdef{definition}\def\mr@glname@fdef{function}\def\mr@glname@use{use}
+\def\mr@glname@value{value}\def\mr@glname@fcall{call}\def\mr@glname@reads{reads}
+\def\mr@glname@definedBy{defined by}\def\mr@glname@calls{calls}\def\mr@glname@returns{returns}
+\def\mr@glname@argument{argument}\def\mr@glname@entry{entry}\def\mr@glname@block{block}
+\def\mr@glname@branch{condition}\def\mr@glname@exit{exit}\def\mr@glname@flow{flow}
+\def\mr@glname@cond{branch (T, F)}\def\mr@glname@back{loop}
+\def\mr@glname@cgmain{top level}\def\mr@glname@cgfun{function}\def\mr@glname@cgbuiltin{of R}
+% whether a graph has a legend: the key legend of \mrDataflowGraph, else the option graphs-legend
+\newif\ifmr@legend
+% the legend: a box with the shapes and the edges of the graph in two columns, where the script found
+% room for it (\mrGraphLegendAt{x}{y}: its top left corner), else below the graph
+\def\mrGraphLegendAt#1#2{\def\mr@glpos{(#1cm,#2cm)}}
+\let\mr@glpos\@empty
+\ExplSyntaxOn
+\seq_new:N \l__mr_glshapes_seq
+\seq_new:N \l__mr_gledges_seq
+\tl_new:N \l__mr_glrows_tl
+\cs_new_protected:Npn \mr@graphlegend
+  {
+    \legacy_if:nT { mr@legend }
+      {
+        \seq_clear:N \l__mr_glshapes_seq
+        \seq_clear:N \l__mr_gledges_seq
+        \clist_map_inline:Nn \mr@glkinds
+          {
+            \cs_if_eq:cNF { mr@gl@ ##1 } \relax
+              { \seq_put_right:Nn \l__mr_glshapes_seq { \tikz[baseline={([yshift=-.5ex]n.center)},sharp~corners]{\node[mr~node,mr~##1,
+                  minimum~height=1em,minimum~width=1.7em,inner~sep=0pt](n){};\mr@gbars{##1}{n}}~
+                  \textcolor{gray!80!black}{\use:c { mr@glname@ ##1 }} } }
+          }
+        \clist_map_inline:Nn \mr@gledges
+          {
+            \cs_if_eq:cNF { mr@gl@ ##1 } \relax
+              { \seq_put_right:Nn \l__mr_gledges_seq { \tikz[baseline=-.55ex,sharp~corners]\draw[mr~edge,mr~##1](0,0)--(.45,0);~
+                  \textcolor{gray!80!black}{\use:c { mr@glname@ ##1 }} } }
+          }
+        \tl_clear:N \l__mr_glrows_tl
+        \int_step_inline:nn { \int_max:nn { \seq_count:N \l__mr_glshapes_seq } { \seq_count:N \l__mr_gledges_seq } }
+          {
+            \tl_put_right:Ne \l__mr_glrows_tl
+              {
+                \exp_not:e { \seq_item:Nn \l__mr_glshapes_seq {##1} } &
+                \exp_not:e { \seq_item:Nn \l__mr_gledges_seq {##1} } \exp_not:N \\
+              }
+          }
+        \tl_if_empty:NTF \mr@glpos
+          { \node[mr~legend,anchor=north~west] at ([yshift=-6pt]current~bounding~box.south~west) }
+          { \node[mr~legend,anchor=north~west] at \mr@glpos }
+          { \def\arraystretch{1.45}\begin{tabular}{@{}l@{\hspace{8pt}}l@{}} \l__mr_glrows_tl \end{tabular} };
+      }
+    \global \let \mr@glpos \@empty
+  }
+\ExplSyntaxOff
+% a frame around the vertices of a file of a graph of several listings (#1 its name, #2 the vertices)
+\newcommand\mrGraphGroup[2]{\begin{pgfonlayer}{background}\node[mr group,fit=#2](mr-g){};
+  \node[mr group label,anchor=south west] at (mr-g.north west) {#1};\end{pgfonlayer}}
+% [#1] the width the layout gives the vertex (cm), so that edges end on it
+\newcommand\mrGraphNode[6][0]{\global\expandafter\let\csname mr@gl@#5\endcsname\@empty
+  \node[mr node,mr #5,minimum width=#1cm] (mr-#2) at (#3cm,#4cm) {#6};\mr@gbars{#5}{mr-#2}}
+% a call has bars at its sides, as in flowR's mermaid graphs
+\def\mr@gbars#1#2{\ifcsname mr@gbars@#1\endcsname\draw[mr fcall bars]([xshift=1.8pt]#2.north west)--([xshift=1.8pt]#2.south west)
+  ([xshift=-1.8pt]#2.north east)--([xshift=-1.8pt]#2.south east);\fi}
+\def\mr@gbars@fcall{}
+% the id of a vertex in the dataflow graph, after its label
+\newcommand\mrGraphId[1]{\,\textcolor{gray!70}{\tiny#1}}
+% what a vertex reads or calls of R itself, below its label
+\newcommand\mrGraphBuiltin[1]{\\[-1pt]\textcolor{gray!80}{\tiny#1}}
+% #1 kind, #2 the whole path, from an anchor of one node to one of the other
+\newcommand\mrGraphPath[2]{\global\expandafter\let\csname mr@gl@#1\endcsname\@empty
+  \path[mr edge,mr #1,rounded corners=1.5pt] #2;}
+% the label of a branch: T green, F red
+\newcommand\mrGraphLabel[1]{\textcolor{\ifcsname mr@glc@#1\endcsname\csname mr@glc@#1\endcsname\else gray\fi}{\bfseries#1}}
+\def\mr@glc@T{mrsource}\def\mr@glc@F{mrerror}
+
+\InputIfFileExists{\mr@database.cfg}{}{\PackageWarning{magic-r}{No link database '\mr@database.cfg'}}
+
+% flowR: the code of every listing goes to '<jobname>.mr.R', one block per
+% listing; magic-r-flowr.mjs answers in '<jobname>.mr.cfg' with the packages
+% the code uses, their links, and where they are loaded. The answer is read
+% at the start of the next run; the helper only runs if the code changed.
+% R: queries go to '<jobname>.mr-eval.R', one Rscript answers all of them in
+% '<jobname>.mr-eval.out', again only if they changed.
+\RequirePackage{shellesc}
+\RequirePackage{verbatim}
+\ExplSyntaxOn
+\msg_new:nnn { magic-r } { failed } { #1~failed~('#2')~running: \\ #3 }
+\msg_new:nnn { magic-r } { manual } { Shell~escape~is~not~available.~Run~by~hand~and~rerun: \\ #1 }
+\msg_new:nnn { magic-r } { rerun } { The~answers~of~#1~changed.~Rerun~to~get~them~right. }
+\msg_new:nnn { magic-r } { flowr } { flowR~could~not~help:~#1.~The~links~come~from~the~shipped~database. }
+\msg_new:nnn { magic-r } { skipped } { flowR~cannot~parse~listing~#1,~its~loads~are~unknown. }
+\msg_new:nnn { magic-r } { r-error } { R~cannot~evaluate~'#1':~#2 }
+\msg_new:nnn { magic-r } { r-load } { R~cannot~source~'#1':~#2 }
+
+% #1 run mode (auto, always, never), #2 command, #3 what, #4 output file;
+% true if the output has a line matching #5
+\bool_new:N \l__mr_ok_bool
+\str_new:N \l__mr_first_str
+\ior_new:N \g__mr_ior
+\iow_new:N \g__mr_iow
+\cs_new:Npn \__mr_in_outdir:n #1
+  {
+    \sys_if_platform_windows:TF
+      { ( if~defined~TEXMF_OUTPUT_DIRECTORY~cd~/d~" \c_percent_str TEXMF_OUTPUT_DIRECTORY \c_percent_str " )~&~ }
+      { cd~"\c_dollar_str\c_left_brace_str TEXMF_OUTPUT_DIRECTORY:-.\c_right_brace_str"~&&~ }
+    #1
+  }
+\cs_new_protected:Npn \__mr_run:nnnnn #1#2#3#4#5
+  {
+    \bool_set_false:N \l__mr_ok_bool
+    \bool_lazy_or:nnTF
+      { \str_if_eq_p:nn {#1} { always } }
+      { \str_if_eq_p:nn {#1} { auto } && \int_compare_p:n { \ShellEscapeStatus = 1 } }
+      {
+        \ShellEscape { \__mr_in_outdir:n {#2} }
+        \str_set:Nn \l__mr_first_str { no~output }
+        \file_if_exist:nT {#4}
+          {
+            \ior_open:Nn \g__mr_ior {#4}
+            \ior_str_map_inline:Nn \g__mr_ior
+              {
+                \str_if_eq:VnT \l__mr_first_str { no~output } { \str_set:Nn \l__mr_first_str {##1} }
+                \regex_match:nnT {#5} {##1} { \bool_set_true:N \l__mr_ok_bool \ior_map_break: }
+              }
+            \ior_close:N \g__mr_ior
+          }
+        \bool_if:NF \l__mr_ok_bool
+          { \msg_warning:nneee { magic-r } { failed } {#3} { \l__mr_first_str } { \__mr_in_outdir:n {#2} } }
+      }
+      {
+        \str_if_eq:nnTF {#1} { never } { \msg_info:nne } { \msg_warning:nne }
+          { magic-r } { manual } { \__mr_in_outdir:n {#2} }
+      }
+  }
+\cs_new_protected:Npn \__mr_aux:e #1 { \legacy_if:nT { @filesw } { \iow_now:Ne \@auxout {#1} } }
+\cs_generate_variant:Nn \__mr_run:nnnnn { VenVn }
+
+\str_new:N \g__mr_flowr_run_str
+\str_gset_eq:NN \g__mr_flowr_run_str \mr@flowr
+\str_const:Ne \c__mr_code_str { \c_sys_jobname_str .mr.R }
+\str_const:Ne \c__mr_answer_str { \c_sys_jobname_str .mr.cfg }
+\tl_new:N \g__mr_node_tl
+\tl_gset:Nn \g__mr_node_tl { node }
+\tl_new:N \g__mr_helper_opts_tl
+\str_new:N \g__mr_flowr_md_str
+\iow_new:N \g__mr_code_iow
+\bool_new:N \g__mr_capture_bool
+\tl_new:N \g__mr_line_tl
+\str_if_eq:VnF \g__mr_flowr_run_str { off }
+  {
+    \AtBeginDocument
+      {
+        \legacy_if:nT { @filesw }
+          { \iow_open:Nn \g__mr_code_iow { \c__mr_code_str } \bool_gset_true:N \g__mr_capture_bool }
+        \__mr_aux:e { \token_to_str:N \providecommand \token_to_str:N \mr@flowr@md [1] { } }
+      }
+  }
+\cs_new_protected:Npn \mr@flowr@md #1 { \str_gset:Nn \g__mr_flowr_md_str {#1} }
+\bool_new:N \g__mr_block_bool
+\cs_gset_protected:Npn \mr@begin { \tl_gclear:N \g__mr_line_tl \bool_gset_true:N \g__mr_block_bool }
+\cs_new:Npn \__mr_capturing:T #1
+  { \bool_if:NT \g__mr_capture_bool { \legacy_if:nT { mr@active } { \legacy_if:nT { mr@capture } {#1} } } }
+% the indentation of a line: the column of its first token (for flowR's playground)
+\int_new:N \g__mr_indent_int
+\cs_new_protected:Npn \__mr_grab:
+  {
+    \__mr_capturing:T
+      {
+        \tl_if_empty:NT \g__mr_line_tl { \int_gset:Nn \g__mr_indent_int { \lst@column - \lst@pos } }
+        \tl_gput_right:No \g__mr_line_tl { \tex_the:D \lst@token }
+      }
+  }
+\lst@AddToHook { Output } { \__mr_grab: }
+\lst@AddToHook { OutputOther } { \__mr_grab: }
+% the characters of a line: \mr@plain spells out what listings made of them,
+% the braces of literates go, the braces of R are characters already
+\tl_new:N \l__mr_line_tl
+\cs_new_protected:Npn \__mr_write_line:
+  {
+    \__mr_capturing:T
+      {
+            \bool_if:NT \g__mr_block_bool
+              {
+                \bool_gset_false:N \g__mr_block_bool
+                \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~block~\int_use:N \mr@lstid }
+                \tl_if_empty:NF \l__mr_label_tl
+                  { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~label~ \tl_to_str:N \l__mr_label_tl } }
+              }
+            \group_begin:
+            \cs_set_eq:NN \protect \@unexpandable@protect
+            \mr@plain
+            \tl_set:Ne \l__mr_line_tl { \g__mr_line_tl }
+            \regex_replace_all:nnN { \cB. | \cE. } { } \l__mr_line_tl
+            \iow_now:Ne \g__mr_code_iow { \tl_to_str:N \l__mr_line_tl }
+            \seq_map_inline:Nn \g__mr_side_seq { \__mr_side_write:Nn ##1 }
+            \group_end:
+            \tl_gclear:N \g__mr_line_tl
+      }
+  }
+\lst@AddToHook { EOL } { \__mr_write_line: }
+% an escape to LaTeX ('!*\textbf{x}*!') is code for flowR as its text ('x'): the escape is read up
+% to the active '*' that ends it, typeset, and its text added to the line and its columns
+\cs_new_protected:Npn \mr@escaped #1
+  {
+    \__mr_capturing:T
+      {
+        \str_set:Ne \l__mr_tmp_str { \text_purify:n {#1} }
+        \regex_replace_all:nnN { \\[A-Za-z]+\ ? | \$ } { } \l__mr_tmp_str
+        \tl_gput_right:NV \g__mr_line_tl \l__mr_tmp_str
+        \int_gadd:Nn \mr@col { \str_count:N \l__mr_tmp_str }
+      }
+  }
+\ExplSyntaxOff
+\begingroup\lccode`\~=`\*\lowercase{\endgroup\def\mr@escgrab\fi#1~{\fi\mr@escaped{#1}#1~}}
+\ExplSyntaxOn
+\lst@AddToHook { DeInit } { \tl_if_empty:NF \g__mr_line_tl { \__mr_write_line: } }
+
+\cs_gset_protected:Npn \mr@readflowr
+  {
+    \str_if_eq:VnF \g__mr_flowr_run_str { off }
+      { \file_if_exist:nT { \c__mr_answer_str } { \file_input:n { \c__mr_answer_str } } }
+  }
+\NewDocumentCommand \mrFlowrStatus { m m }
+  {
+    \str_if_eq:nnT {#1} { ok } { \cs_gset:cpn { mr@inst@ } {#2} }
+    \str_if_eq:nnF {#1} { ok }
+      { \legacy_if:nTF { mr@flowr-required } { \msg_error:nnn } { \msg_warning:nnn } { magic-r } { flowr } {#2} }
+  }
+\NewDocumentCommand \mrFlowrSkipped { m } { \msg_info:nnn { magic-r } { skipped } {#1} }
+\NewDocumentCommand \mrLoad { m m m } { \csgappto { mr@loads@#1@#2 } { \mr@attach {#3} } }
+\NewDocumentCommand \mrNodeCommand { m } { \tl_gset:Nn \g__mr_node_tl {#1} }
+\NewDocumentCommand \mrFlowrOptions { m } { \tl_gput_right:Nn \g__mr_helper_opts_tl { ~#1 } }
+\NewDocumentCommand \mrFlowrRun { m } { \str_gset:Nn \g__mr_flowr_run_str {#1} }
+\tl_if_empty:cF { mr@flowr-backend }
+  { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--backend~ \use:c { mr@flowr-backend } } }
+\tl_if_empty:cF { mr@flowr-engine }
+  { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--engine~ \use:c { mr@flowr-engine } } }
+\tl_if_empty:cF { mr@flowr-command }
+  { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--flowr~" \use:c { mr@flowr-command } " } }
+\tl_if_empty:cF { mr@flowr-image }
+  { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--image~ \use:c { mr@flowr-image } } }
+\tl_if_empty:cF { mr@flowr-version }
+  { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--require-version~" \use:c { mr@flowr-version } " } }
+\msg_new:nnn { magic-r } { requests } { flowR~could~not~answer~the~queries~of~the~document:~#1 }
+\NewDocumentCommand \mrFlowrRequestsFailed { m } { \msg_warning:nnn { magic-r } { requests } {#1} }
+
+% the label of a listing (key mrname) names its block for the queries below
+\tl_new:N \l__mr_label_tl
+\lst@Key { mrname } { } { \tl_set:Nn \l__mr_label_tl {#1} \def\mr@lstlabel@{#1} }
+% #1 JSON of a request, answered in the next run; requests are lines of the code file
+\cs_new_protected:Npn \__mr_request:n #1
+  {
+    \bool_if:NT \g__mr_capture_bool
+      { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~request~ \tl_to_str:n {#1} } }
+  }
+\cs_generate_variant:Nn \__mr_request:n { e }
+% #1 kind, #2 name, #3 block (empty: the whole document), #4 more JSON
+% the flowR that answers a request: another one than the document's ('docker:<image>',
+% 'node:<command>'), from the key mrflowr of a listing or flowr of a command
+\tl_new:N \l__mr_instance_tl
+\cs_new_protected:Npn \__mr_request:nnnn #1#2#3#4
+  {
+    \__mr_request:e
+      {
+        \c_left_brace_str "kind":" #1 ", ~ "name":" #2 "
+        \tl_if_blank:nF {#3} { , ~ "block":" #3 " } #4
+        \tl_if_empty:NF \l__mr_instance_tl { , ~ "instance":" \tl_to_str:N \l__mr_instance_tl " }
+        \c_right_brace_str
+      }
+  }
+\lst@Key { mrflowr } { } { \tl_set:Nn \l__mr_instance_tl {#1} }
+% \mrFlowrDescription{instance}: the flowR that answered for an instance ('docker flowR 2.15.10'),
+% \mrFlowrDescription{} the one of the document
+\NewDocumentCommand \mrFlowrInstance { m m } { \cs_gset:cpn { mr@inst@ \tl_to_str:n {#1} } {#2} }
+\NewDocumentCommand \mrFlowrDescription { m }
+  { \cs_if_exist_use:cF { mr@inst@ \tl_to_str:n {#1} } { \mr@r@pending } }
+
+% \mrDataflowGraph[tikz options]{label} and \mrControlFlowGraph: the graphs of a listing,
+% laid out by the script, drawn with TikZ (package option graphs)
+% the keys of a graph: legend (default: the option graphs-legend), rowsep (the least distance of its
+% rows in cm, more where edges run sideways); all others are options of TikZ
+\bool_new:N \l__mr_legend_bool
+\tl_new:N \l__mr_rowsep_tl
+\clist_new:N \l__mr_tikz_clist
+\bool_new:N \l__mr_mermaid_bool
+\tl_new:N \l__mr_gfun_tl
+\tl_new:N \l__mr_mermaid_tl
+\keys_define:nn { magic-r / graph }
+  {
+    legend .bool_set:N = \l__mr_legend_bool ,
+    legend .default:n = true ,
+    rowsep .tl_set:N = \l__mr_rowsep_tl ,
+    flowr .tl_set:N = \l__mr_instance_tl ,
+    function .tl_set:N = \l__mr_gfun_tl ,
+    mermaid .code:n = { \bool_set_true:N \l__mr_mermaid_bool \tl_set:Nn \l__mr_mermaid_tl {#1} } ,
+    mermaid .default:n = { mermaid.live }
+  }
+% \mrFlowrMermaid{name}{url}{part after '#'} from the script: the graph on mermaid.live, as flowR draws it
+\NewDocumentCommand \mrFlowrMermaid { m m m }
+  { \cs_gset:cpe { mr@mermaid@ #1 } { \tl_to_str:n {#2} \mr@hashchar \tl_to_str:n {#3} } }
+\tl_new:N \l__mr_gname_tl
+\cs_new_protected:Npn \__mr_graph:nnn #1#2#3
+  {
+    \group_begin:
+    \legacy_if:nTF { mr@graphs-legend } { \bool_set_true:N \l__mr_legend_bool } { \bool_set_false:N \l__mr_legend_bool }
+    \tl_set:Nn \l__mr_rowsep_tl { 0.2 }
+    \keys_set_known:nnN { magic-r / graph } {#2} \l__mr_tikz_clist
+    % the answer of another flowR has a name of its own
+    \str_set:Ne \l_tmpa_str { \str_mdfive_hash:e { \tl_to_str:N \l__mr_instance_tl } }
+    % several listings (#3: 'a,b') give a name without commas
+    \str_set:Ne \l_tmpb_str { \tl_to_str:n {#3} }
+    \str_replace_all:Nnn \l_tmpb_str { ~ } { }
+    \str_replace_all:Nnn \l_tmpb_str { , } { _ }
+    \tl_set:Ne \l__mr_gname_tl
+      {
+        #1- \l_tmpb_str \tl_if_empty:NF \l__mr_gfun_tl { - \tl_to_str:N \l__mr_gfun_tl }
+        \tl_if_empty:NF \l__mr_instance_tl { - \str_range:Nnn \l_tmpa_str { 1 } { 8 } }
+      }
+    \bool_if:NTF \l__mr_mermaid_bool
+      {
+        % only a link to the graph on mermaid.live, as flowR draws it
+        \__mr_request:nnnn { mermaid } { mermaid- \l__mr_gname_tl } {#3} { , ~ "graph":" #1 " }
+        \cs_if_exist:cTF { mr@mermaid@ mermaid- \l__mr_gname_tl }
+          {
+            \cs_if_exist:NTF \href
+              {
+                \tl_set:Ne \l_tmpa_tl { \exp_not:N \href { \use:c { mr@mermaid@ mermaid- \l__mr_gname_tl } } }
+                \l_tmpa_tl { \l__mr_mermaid_tl }
+              }
+              { \l__mr_mermaid_tl }
+          }
+          { \mr@r@pending }
+      }
+      {
+        \__mr_request:nnnn {#1} { \l__mr_gname_tl } {#3}
+          {
+            , ~ "rowsep": " \tl_to_str:N \l__mr_rowsep_tl "
+            \tl_if_empty:NF \l__mr_gfun_tl { , ~ "function": " \tl_to_str:N \l__mr_gfun_tl " }
+          }
+        \bool_if:NTF \l__mr_legend_bool { \mr@legendtrue } { \mr@legendfalse }
+        \cs_if_exist:cTF { mr@graph@ \l__mr_gname_tl }
+          {
+            \cs_if_exist:NTF \tikzpicture
+              {
+                \tl_set:Ne \l_tmpa_tl { \exp_not:c { mr@graph@ \l__mr_gname_tl } { \exp_not:V \l__mr_tikz_clist } }
+                \tl_use:N \l_tmpa_tl
+              }
+              { \msg_error:nn { magic-r } { graphs } }
+          }
+          { \mr@r@pending }
+      }
+    \group_end:
+  }
+\msg_new:nnn { magic-r } { graphs } { Graphs~need~TikZ:~load~magic-r~with~the~option~'graphs'. }
+\NewDocumentCommand \mrDataflowGraph { O{} m } { \__mr_graph:nnn { dataflow } {#1} {#2} }
+\NewDocumentCommand \mrControlFlowGraph { O{} m } { \__mr_graph:nnn { control-flow } {#1} {#2} }
+\NewDocumentCommand \mrCallGraph { O{} m } { \__mr_graph:nnn { call-graph } {#1} {#2} }
+% from the answer: #1 name, #2 nodes, #3 edges
+\NewDocumentCommand \mrFlowrGraph { m +m +m }
+  {
+    \cs_gset:cpe { mr@graph@ #1 } ##1
+      {
+        \exp_not:N \mr@drawgraph {##1} { \exp_not:n { #2 #3 } }
+          { \exp_not:N \mr@graphlegend }
+      }
+  }
+
+% \mrFlowrQuery[block=label,path=/json/pointer]{name}{json}: any query of flowR,
+% \mrFlowrValue{name} the part of the answer the path points to
+\tl_new:N \l__mr_qblock_tl
+\tl_new:N \l__mr_qpath_tl
+\keys_define:nn { magic-r / query }
+  {
+    block .tl_set:N = \l__mr_qblock_tl ,
+    path  .tl_set:N = \l__mr_qpath_tl ,
+    flowr .tl_set:N = \l__mr_instance_tl ,
+  }
+\NewDocumentCommand \mrFlowrQuery { O{} m m }
+  {
+    \group_begin:
+    \keys_set:nn { magic-r / query } {#1}
+    \__mr_request:nnnn { query } {#2} { \l__mr_qblock_tl }
+      { , ~ "path":" \tl_to_str:V \l__mr_qpath_tl ", ~ "query": \tl_to_str:n {#3} }
+    \group_end:
+  }
+\NewDocumentCommand \mrFlowrValue { m } { \cs_if_exist_use:cF { mr@answer@ #1 } { \mr@r@pending } }
+\NewDocumentCommand \mrFlowrResult { m m } { \cs_gset:cpn { mr@answer@ #1 } {#2} }
+
+% the key mrslice={criterion} dims every line flowR does not keep in the slice
+% for the criterion ('7@w': w in line 7; '7:3': line 7, column 3)
+\tl_new:N \l__mr_slice_tl
+% side files: all of the code of a listing in a file of its own (\jobname.mr-<kind>-<listing>.R),
+% for a slice as flowR gets it, for flowR's playground with its indentation
+\iow_new:N \g__mr_slice_iow
+\iow_new:N \g__mr_play_iow
+\seq_new:N \g__mr_side_seq
+\cs_new_protected:Npn \__mr_side_open:Nnn #1#2#3
+  {
+    \iow_open:Nn #1 { \c_sys_jobname_str .mr- #2 - \int_use:N \mr@lstid .R }
+    \seq_gput_right:Nn \g__mr_side_seq { #1 {#3} }
+  }
+\cs_new_protected:Npn \__mr_side_write:Nn #1#2
+  {
+    \iow_now:Ne #1
+      {
+        \bool_lazy_and:nnT {#2} { ! \tl_if_empty_p:N \l__mr_line_tl }
+          { \prg_replicate:nn { \g__mr_indent_int } { \c_space_tl } }
+        \tl_to_str:N \l__mr_line_tl
+      }
+  }
+\lst@AddToHook { DeInit }
+  {
+    \seq_map_inline:Nn \g__mr_side_seq { \__mr_side_close:Nn ##1 }
+    \seq_gclear:N \g__mr_side_seq
+  }
+\cs_new_protected:Npn \__mr_side_close:Nn #1#2 { \iow_close:N #1 }
+\lst@Key { mrslice } { } { \tl_set:Nn \l__mr_slice_tl {#1} }
+\lst@AddToHook { Init }
+  {
+    \legacy_if:nT { mr@active }
+      {
+        \tl_if_empty:NF \l__mr_label_tl
+          {
+            \__mr_aux:e
+              {
+                \token_to_str:N \mr@lstlabel { \tl_to_str:N \l__mr_label_tl }
+                  { \int_use:N \mr@lstid } { \mr@indexmode }
+              }
+          }
+        \tl_if_empty:NF \l__mr_slice_tl
+          {
+            \__mr_request:nnnn { slice } { slice- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
+              {
+                , ~ "criterion":" \tl_to_str:V \l__mr_slice_tl ",
+                ~ "file":" \c_sys_jobname_str .mr-slice- \int_use:N \mr@lstid .R"
+              }
+            % the slice is computed on all of the code, which a hidden listing does not show
+            \bool_if:NF \g__mr_slicehidden_bool
+              {
+                \__mr_side_open:Nnn \g__mr_slice_iow { slice } { \c_false_bool }
+              }
+          }
+      }
+  }
+% the key mrlint (true, false, or the rules as JSON: ["unused-definitions", ...]) and the option
+% lint run flowR's linter on a listing; \mrLinterRules{json} sets the rules of all listings
+\tl_new:N \l__mr_lint_tl
+\tl_new:N \g__mr_lint_rules_tl
+\lst@Key { mrlint } { } [ true ] { \tl_set:Nn \l__mr_lint_tl {#1} }
+\NewDocumentCommand \mrLinterRules { m } { \tl_gset:Nn \g__mr_lint_rules_tl {#1} }
+\lst@AddToHook { Init }
+  {
+    \legacy_if:nT { mr@active }
+      {
+        \tl_if_empty:NT \l__mr_lint_tl { \legacy_if:nT { mr@lint } { \tl_set:Nn \l__mr_lint_tl { true } } }
+        \bool_lazy_or:nnF { \tl_if_empty_p:N \l__mr_lint_tl } { \str_if_eq_p:Vn \l__mr_lint_tl { false } }
+          {
+            \str_if_eq:VnT \l__mr_lint_tl { true } { \tl_set_eq:NN \l__mr_lint_tl \g__mr_lint_rules_tl }
+            \__mr_request:nnnn { lint } { lint- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
+              { \tl_if_empty:NF \l__mr_lint_tl { , ~ "rules": \tl_to_str:N \l__mr_lint_tl } }
+          }
+      }
+  }
+% the key mrarrows={criteria}: an arrow from the name each criterion points at to every definition
+% it reads, drawn over the listing (TikZ, option graphs). The key mrinteractive (with the option
+% interactive, default true with interactive=all) gives every name its arrows, which a click on it
+% shows or hides
+% (optional content of the PDF, with ocgx2); those of the criteria are shown at first
+\tl_new:N \l__mr_arrows_tl
+\tl_new:N \l__mr_inter_tl
+\lst@Key { mrarrows } { } { \tl_set:Nn \l__mr_arrows_tl {#1} }
+\lst@Key { mrinteractive } { } [ true ] { \tl_set:Nn \l__mr_inter_tl {#1} }
+\cs_new:Npn \__mr_json_item:n #1 { , " \tl_trim_spaces:n {#1} " }
+\cs_new:Npn \__mr_json_list:N #1
+  { [ \clist_if_empty:NF #1 { \exp_last_unbraced:Nf \use_none:n { \clist_map_function:NN #1 \__mr_json_item:n } } ] }
+\newif\ifmr@ainter
+% #3: whether a listing has a feature, from its key (#1: true or false) or else the option #2
+\cs_new_protected:Npn \__mr_flag:Nnn #1#2#3
+  {
+    \legacy_if_gset_false:n {#3}
+    \tl_if_empty:NTF #1
+      { \legacy_if:nT {#2} { \legacy_if_gset_true:n {#3} } }
+      { \str_if_eq:VnT #1 { true } { \legacy_if_gset_true:n {#3} } }
+  }
+\msg_new:nnn { magic-r } { interactive } { Interactive~arrows~need~ocgx2:~load~magic-r~with~the~option~'interactive'. }
+\lst@AddToHook { Init }
+  {
+    \legacy_if_gset_false:n { mr@ainter }
+    \legacy_if:nT { mr@active }
+      {
+        \__mr_flag:Nnn \l__mr_inter_tl { mr@interall } { mr@ainter }
+        \legacy_if:nT { mr@ainter } { \tl_if_empty:NT \mr@locallinkskey { \legacy_if_set_false:n { mr@locallinks } } }
+        \legacy_if:nT { mr@ainter }
+          {
+            \cs_if_exist:NF \toggleocgs
+              { \msg_error:nn { magic-r } { interactive } \legacy_if_gset_false:n { mr@ainter } }
+          }
+        \bool_lazy_or:nnT { ! \tl_if_empty_p:N \l__mr_arrows_tl } { \legacy_if_p:n { mr@ainter } }
+          {
+            \clist_set:NV \l_tmpa_clist \l__mr_arrows_tl
+            \__mr_request:nnnn { arrows } { arrows- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
+              {
+                , ~ "criteria": \__mr_json_list:N \l_tmpa_clist
+                \legacy_if:nT { mr@ainter } { , ~ "all": true }
+              }
+          }
+      }
+  }
+% the key mrplayground (default: the option playground): a button at the right of the first line
+% opens the code of the listing in flowR's playground, with the criteria of mrslice and mrarrows
+% marked, and a finding of the linter opens it with the finding marked
+\tl_new:N \l__mr_play_tl
+\clist_new:N \l__mr_marks_clist
+\lst@Key { mrplayground } { } [ true ] { \tl_set:Nn \l__mr_play_tl {#1} }
+\lst@AddToHook { Init }
+  {
+    \legacy_if_gset_false:n { mr@play }
+    \legacy_if:nT { mr@active }
+      {
+        \__mr_flag:Nnn \l__mr_play_tl { mr@playground } { mr@play }
+        \legacy_if:nT { mr@play }
+          {
+            \clist_set:Ne \l__mr_marks_clist { \l__mr_slice_tl , \l__mr_arrows_tl }
+            \__mr_side_open:Nnn \g__mr_play_iow { play } { \c_true_bool }
+            \__mr_request:nnnn { playground } { pg- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
+              {
+                , ~ "file":" \c_sys_jobname_str .mr-play- \int_use:N \mr@lstid .R",
+                ~ "marks": \__mr_json_list:N \l__mr_marks_clist
+              }
+          }
+      }
+  }
+\NewDocumentCommand \mrFlowrSlice { m m }
+  {
+    \clist_map_inline:nn {#2} { \cs_gset:cpn { mr@sliced@ #1 @ ##1 } { } }
+    \cs_gset:cpn { mr@slice@ #1 } { }
+    \cs_gset:cpe { mr@slicerange@ #1 } { \clist_map_function:nN {#2} \__mr_range:n }
+  }
+\cs_new:Npn \__mr_range:n #1 { #1 - #1 , }
+% the key mrslicemode=dim|hide (default: the option slices); hide shows only the lines of the
+% slice, with their numbers, through the line ranges of listings
+\tl_new:N \l__mr_slicemode_tl
+\tl_set_eq:NN \l__mr_slicemode_tl \mr@slices
+\lst@Key { mrslicemode } { } { \tl_set:Nn \l__mr_slicemode_tl {#1} }
+\cs_new:Npn \mr@slicehide { \str_if_eq_p:Vn \l__mr_slicemode_tl { hide } }
+\bool_new:N \g__mr_slicehidden_bool
+\cs_new:Npn \mr@ifslicehidden { \bool_if:NTF \g__mr_slicehidden_bool }
+\lst@AddToHookAtTop { Init }
+  {
+    \legacy_if:nT { mr@active }
+      {
+        \bool_gset_false:N \g__mr_slicehidden_bool
+        \bool_lazy_and:nnT { \mr@slicehide }
+          {
+            \cs_if_exist_p:c { mr@slicerange@slice- \int_use:N \mr@lstid }
+            && ! \tl_if_empty_p:c { mr@slicerange@slice- \int_use:N \mr@lstid }
+          }
+          {
+            \bool_gset_true:N \g__mr_slicehidden_bool
+            \tl_set_eq:Nc \lst@linerange { mr@slicerange@slice- \int_use:N \mr@lstid }
+            \cs_set_eq:NN \lst@ifconsecutivenumbers \iffalse
+            \cs_set_eq:NN \lst@interrange \c_empty_tl
+          }
+      }
+  }
+\ExplSyntaxOff
+% at the start of a line: what flowR says of it (dependencies, slice)
+\def\mr@linemark{}\newif\ifmr@dim
+\lst@AddToHook{InitVarsBOL}{\ifmr@active\global\mr@dimfalse
+  \ifx\mr@linemark\@empty\global\let\mr@lastmark\@empty\fi\gdef\mr@linemark{}\mr@numbers%
+  \edef\mr@t{\the\mr@lstid @\the\numexpr\mr@line+1}%
+  \ifmr@dependencies\ifcsname mr@fline@\mr@t\endcsname
+    \ifcsname mr@dep@\csname mr@fline@\mr@t\endcsname\endcsname
+      \xdef\mr@linemark{\csname mr@dep@\csname mr@fline@\mr@t\endcsname\endcsname}%
+      \xdef\mr@linekind{\csname mr@fline@\mr@t\endcsname}\fi\fi\fi
+  \mr@ifslicehidden{}{\ifcsname mr@slice@slice-\the\mr@lstid\endcsname
+    \ifcsname mr@sliced@slice-\the\mr@lstid @\the\numexpr\mr@line+1\endcsname\else\global\mr@dimtrue\fi\fi}\fi}
+\lst@Key{mrdependencies}\relax[t]{\lstKV@SetIf{#1}\ifmr@dependencies}
+% the colors of the kinds of lines; a kind without one is not marked ('output')
+\definecolor{mrread}{HTML}{1E66F5}\definecolor{mrwrite}{HTML}{DF8E1D}
+\definecolor{mrsource}{HTML}{40A02B}\definecolor{mrvisualize}{HTML}{8839EF}
+\def\mr@dep@read{mrread}\def\mr@dep@write{mrwrite}\def\mr@dep@source{mrsource}
+\def\mr@dep@visualize{mrvisualize}\def\mr@dep@test{mrsource}\def\mr@dep@remote{mrread}
+\def\mr@style@dim{\color{lightgray}}
+% a dimmed line has no colored numbers: \mr@numbers restores those of the listing at a line start
+\lst@AddToHook{Init}{\let\mr@dgt\xlst@dgt\let\mr@pfx\xlst@pfx}
+\def\mr@numbers{\let\xlst@dgt\mr@dgt\let\xlst@pfx\mr@pfx}
+\lst@AddToHook{InitVarsBOL}{\ifmr@active\ifmr@dim\xlstdisablenumhl\fi\fi}
+% a marked line gets a band across the listing and a bar left of the code; the first line of a run
+% of lines of the same kind names it at the right
+\def\mrDependencyBar{\llap{\color{\mr@linemark}\rule[-\dp\strutbox]{1.6pt}{\dimexpr\ht\strutbox+\dp\strutbox}\hspace{2pt}}%
+  \rlap{\color{\mr@linemark!11}\rule[-\dp\strutbox]{\linewidth}{\dimexpr\ht\strutbox+\dp\strutbox}}}
+\def\mrDependencyNote#1{\rlap{\makebox[\linewidth][r]{\normalfont\sffamily\scriptsize\color{\mr@linemark!80!black}#1}}}
+\let\mr@lastmark\@empty
+\lst@AddToHook{EveryPar}{\ifmr@active\ifx\mr@linemark\@empty\else\mrDependencyBar
+  \ifx\mr@linemark\mr@lastmark\else\ifx\mr@lintnote\@empty\expandafter\mrDependencyNote\expandafter{\mr@linekind}\fi\fi\fi
+  \global\let\mr@lastmark\mr@linemark\fi}
+\lst@AddToHook{Output}{\ifmr@active\ifmr@dim\let\lst@thestyle\mr@style@dim\fi\fi}
+\lst@AddToHook{OutputOther}{\ifmr@active\ifmr@dim\let\lst@thestyle\mr@style@dim\fi\fi}
+% the column of a token in the code flowR got: the code file has neither the
+% indentation nor runs of spaces, and each token is as long as its text
+\newcount\mr@col
+% flowR's linter: the tokens of a finding get a dashed line below them, in mrerror if it is certain,
+% else in mrwarning, and the first line of a finding names its rules at the right
+\let\mr@lintranges\@empty\let\mr@lintnote\@empty
+\newcommand*\mrFlowLint[4]{\csgappto{mr@lint@#1}{{#2}{#3}{#4}}}
+\newcommand*\mrFlowLintNote[2]{\csgdef{mr@lintnote@#1}{#2}}
+% the marks and the cursor of a finding in flowR's playground (#2 'lint:rule,...', #3 its line)
+\newcommand*\mrFlowLintPlay[3]{\csxdef{mr@lintplay@#1}{\detokenize{&h=#2&p=#3}}}
+\lst@AddToHook{InitVarsBOL}{\ifmr@active\edef\mr@t{\the\mr@lstid @\the\numexpr\mr@line+1}%
+  \global\expandafter\let\expandafter\mr@lintranges\csname mr@lint@\mr@t\endcsname
+  \global\expandafter\let\expandafter\mr@lintnote\csname mr@lintnote@\mr@t\endcsname
+  \ifx\mr@lintranges\relax\global\let\mr@lintranges\@empty\fi
+  \ifx\mr@lintnote\relax\global\let\mr@lintnote\@empty\fi\fi}
+% \mr@lintx: where the token starts in the line (the code font is monospaced), \mr@lintpre and
+% \mr@lintpost: how far the line goes beyond it, into the tokens before and after of the finding
+\def\mr@lintcheck{\let\mr@lintcolor\@empty\def\mr@lintpre{\mrLintOverlap}\def\mr@lintpost{\mrLintOverlap}%
+  \edef\mr@lintx{\the\dimexpr\numexpr\lst@column-\lst@pos\relax\lst@width\relax}%
+  \expandafter\mr@lintrange\mr@lintranges\@nil\@nil\@nil
+  \ifx\mr@lintcolor\@empty\else\let\mr@lintstyle\lst@thestyle\let\lst@thestyle\mr@lintmark\fi}
+\def\mr@lintrange#1#2#3{\ifx\@nil#1\else
+  \ifnum#1<\numexpr\mr@col+\lst@length\relax\ifnum#2<\mr@col\else
+    \ifx\mr@lintcolor\@empty\csname mr@lintc@#3\endcsname\else\def\mr@t{#3}\ifx\mr@t\mr@certain\mr@lintc@certain\fi\fi
+    \ifnum#1<\mr@col\else\def\mr@lintpre{0pt}\fi
+    \ifnum#2<\numexpr\mr@col+\lst@length-1\relax\def\mr@lintpost{0pt}\else\ifnum#2=\numexpr\mr@col+\lst@length-1\relax
+      \def\mr@lintpost{0pt}\fi\fi\fi\fi
+  \expandafter\mr@lintrange\fi}
+\def\mr@certain{certain}
+\def\mr@lintc@certain{\def\mr@lintcolor{mrerror}}\def\mr@lintc@uncertain{\def\mr@lintcolor{mrwarning}}
+\newbox\mr@lintbox
+% \mrLintShape{wave|dash|line}: how a finding is underlined, \mrLintLine{color} draws it below
+% \mr@lintbox (redefine it for other shapes)
+\newcommand*\mrLintShape[1]{\def\mr@lintshape{#1}}\mrLintShape{wave}
+\def\mrLintLine#1{\rlap{\color{#1}\csname mr@lintline@\mr@lintshape\endcsname}}
+\def\mr@lintline@line{\rule[-2.2pt]{\wd\mr@lintbox}{.6pt}}
+% the pattern starts at the start of the line, so the pieces of the tokens of a finding join
+\def\mrLintOverlap{4pt}
+\def\mr@lintleaders#1{\kern-\mr@lintx\hbox{\kern\dimexpr\mr@lintx-\mr@lintpre\relax
+  \leaders\hbox{#1}\hskip\dimexpr\wd\mr@lintbox+\mr@lintpre+\mr@lintpost\relax}}
+\def\mr@lintline@dash{\mr@lintleaders{\hbox to 2pt{\hss\rule[-2.4pt]{1.2pt}{.7pt}\hss}}}
+% the wave of ulem, the glyph 58 of lasy
+\def\mr@lintline@wave{\mr@lintleaders{\lower3.2pt\hbox{\usefont{U}{lasy}{m}{n}\fontsize{6}{6}\selectfont\char58}}}
+% listings uses \@tempboxa itself, and \aftergroup (hence the group)
+\def\mr@lintmark#1{\setbox\mr@lintbox\hbox{\begingroup\mr@lintstyle{#1}\endgroup}%
+  \edef\mr@t{mr@lintplay@\the\mr@lstid @\the\numexpr\mr@line+1}%
+  \ifcsname\mr@t\endcsname\mr@playlink{\csname\mr@t\endcsname}{\mr@lintover}\else\mr@lintover\fi}
+% the line of a finding goes over the token, so it covers the underline of a link
+\def\mr@lintover{\copy\mr@lintbox\kern-\wd\mr@lintbox\mrLintLine\mr@lintcolor\kern\wd\mr@lintbox}
+% flowR's playground: \mrFlowrPlayground{pg-<listing>}{hash} from the script is the code of a
+% listing (with its marks), \mr@playlink{more}{text} links text to it, with more of the hash (a finding)
+\def\mrPlaygroundUrl{https://flowr-analysis.github.io/flowr/wiki/playground/}
+\begingroup\catcode`\#=12 \gdef\mr@hashchar{#}\endgroup
+\newcommand*\mrFlowrPlayground[2]{\csxdef{mr@pg@#1}{\detokenize{#2}}}
+\def\mr@playlink#1#2{\ifdefined\href\ifcsname mr@pg@pg-\the\mr@lstid\endcsname\ifmr@play
+  \edef\mr@t{\noexpand\href{\mrPlaygroundUrl\mr@hashchar\csname mr@pg@pg-\the\mr@lstid\endcsname#1}}%
+  \mr@t{#2}\else#2\fi\else#2\fi\else#2\fi}
+\newif\ifmr@play
+% the button at the right of the first line, beside the listing, \mrPlaySize across in the color
+% mrplay: \mrPlayStyle{subtle} (the default) is a thin ring around a triangle, \mrPlayStyle{filled}
+% a white triangle on a disc; redefine \mrPlayButton for another one
+\colorlet{mrplay}{gray!55}
+\def\mrPlaySize{1.15em}
+\newcommand*\mrPlayStyle[1]{\def\mr@playstyle{#1}}\mrPlayStyle{subtle}
+\def\mr@play@subtle{\draw[mrplay,line width=.35pt](0,0)circle(.42);
+  \fill[mrplay,rounded corners=.3pt](-.11,-.17)--(-.11,.17)--(.19,0)--cycle;}
+\def\mr@play@filled{\fill[mrplay!18](0,0)circle(.56);\fill[mrplay](0,0)circle(.46);
+  \fill[white,rounded corners=.4pt](-.13,-.2)--(-.13,.2)--(.22,0)--cycle;}
+\def\mrPlayButton{\ifdefined\tikz\tikz[baseline={(0,-.32em)},x=\mrPlaySize,y=\mrPlaySize]{%
+  \csname mr@play@\mr@playstyle\endcsname}\else\textsf{\tiny flowR}\fi}
+\lst@AddToHook{EveryPar}{\ifmr@active\ifnum\mr@line=\z@\ifmr@play
+  \rlap{\smash{\hspace*{\linewidth}\hspace{.6em}\mr@playlink{}{\mrPlayButton}}}\fi\fi\fi}
+% a rule of the linter links to its page in flowR's wiki (#2 its name there)
+\DeclareRobustCommand*\mrLintRule[2]{\ifdefined\href\colorlet{mr@plain}{.}%
+  \href{https://github.com/flowr-analysis/flowr/wiki/\%5BLinting-Rule\%5D-#2}{\color{mr@plain}#1}\else#1\fi}
+\def\mrLintNote#1{\rlap{\makebox[\linewidth][r]{\normalfont\sffamily\scriptsize\color{mrerror!75!black}#1}}}
+\lst@AddToHook{EveryPar}{\ifmr@active\ifx\mr@lintnote\@empty\else\mrLintNote\mr@lintnote\fi\fi}
+\lst@AddToHook{Output}{\ifmr@active\ifx\mr@lintranges\@empty\else\mr@lintcheck\fi\fi}
+\lst@AddToHook{OutputOther}{\ifmr@active\ifx\mr@lintranges\@empty\else\mr@lintcheck\fi\fi}
+
+% Arrows (key mrarrows): the names of an arrow become TikZ nodes ('mr-a-<listing>-<line>-<column>'),
+% the last one of a listing draws all of its arrows, with the places of the last run. #6 is the
+% variable (or criterion) of an arrow, whose color is one of mrarrow1 to mrarrow5. In an interactive
+% listing every name is an optional content group: a use shows its arrows, a definition the arrows
+% into it, each with the bands of its ends
+\newcommand*\mrFlowArrow[9]{%
+  \csgappto{mr@arrows@#1}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}}%
+  \mr@aname{#1}{#2-#3}{#6}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}\mr@aband{mr-a-#1-#4-#5}{#6}{20}}%
+  \mr@aname{#1}{#4-#5}{#6}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}\mr@aband{mr-a-#1-#2-#3}{#6}{20}}}
+% the name a criterion points at (#2 line, #3 column, #4 its variable): a darker band, and in an
+% interactive listing its arrows are shown at first
+\newcommand*\mrFlowArrowCriterion[4]{\csgdef{mr@asrc@#1@#2-#3}{}\mr@aname{#1}{#2-#3}{#4}{}}
+% a name of an interactive listing (#2 line, #3 column, #4 its variable), also without arrows: a click
+% gives it its band
+\newcommand*\mrFlowArrowName[4]{\csgappto{mr@arrows@#1}{}\mr@aname{#1}{#2-#3}{#4}{}}
+% a name (#2 'line-column') of the arrows of listing #1: its variable #3 and its group, which also
+% shows #4; the last name counted draws the arrows
+\def\mr@aname#1#2#3#4{\ifcsname mr@apt@#1@#2\endcsname\else\csgdef{mr@apt@#1@#2}{#3}%
+  \csgappto{mr@agroups@#1}{{#2}}\mr@ixnext{mr@apts@#1}\global\expandafter\let\csname mr@apts@#1\endcsname\mr@ix\fi
+  \csgappto{mr@agroup@#1@#2}{#4}}
+\ExplSyntaxOn
+\cs_new:Npn \mr@acolorof #1 { mrarrow \int_eval:n { \int_mod:nn { #1 - 1 } { 5 } + 1 } }
+\ExplSyntaxOff
+\newbox\mr@abox
+\def\mr@arrowcheck{\edef\mr@akey{\the\numexpr\mr@line+1\relax-\the\mr@col}%
+  \ifcsname mr@apt@\the\mr@lstid @\mr@akey\endcsname\ifdefined\tikz
+    \edef\mr@anode{mr-a-\the\mr@lstid-\mr@akey}%
+    \edef\mr@acolor{\mr@acolorof{\csname mr@apt@\the\mr@lstid @\mr@akey\endcsname}}%
+    \let\mr@astyle\lst@thestyle\let\lst@thestyle\mr@arrowmark\fi\fi}
+\lst@AddToHook{Output}{\ifmr@active\ifcsname mr@arrows@\the\mr@lstid\endcsname\mr@arrowcheck\fi\fi}
+% the names of the criteria are darker than the other names of the arrows; in an interactive
+% listing a name has no band of its own but shows or hides its group on a click
+\def\mr@arrowmark#1{\setbox\mr@abox\hbox{\begingroup\mr@astyle{#1}\endgroup}%
+  \ifcsname mr@asrc@\the\mr@lstid @\mr@akey\endcsname\def\mr@t{38}\else\def\mr@t{20}\fi
+  \ifmr@ainter
+    \ifcsname mr@agname@\the\mr@lstid @\mr@akey\endcsname\else
+      \csxdef{mr@agname@\the\mr@lstid @\mr@akey}{\mr@token\space(\the\numexpr\mr@line+1)}\fi
+    \toggleocgs{\mr@anode}{\tikz[remember picture,baseline=(\mr@anode.base)]\node[mr arrow token](\mr@anode){\box\mr@abox};}%
+  \else
+    \tikz[remember picture,baseline=(\mr@anode.base)]\node[mr arrow token,fill=\mr@acolor!\mr@t](\mr@anode){\box\mr@abox};%
+  \fi
+  \mr@ixnext{mr@aseen@\the\mr@lstid}\global\expandafter\let\csname mr@aseen@\the\mr@lstid\endcsname\mr@ix
+  \ifnum\csname mr@aseen@\the\mr@lstid\endcsname=\csname mr@apts@\the\mr@lstid\endcsname\relax\mr@adraw\fi}
+% all arrows of a listing in one picture, or the group of each name in an optional content group of
+% its own, shown at first for the names of the criteria
+\def\mr@adraw{\ifmr@ainter
+    \expandafter\expandafter\expandafter\mr@adrawgroups\csname mr@agroups@\the\mr@lstid\endcsname\relax
+  \else\tikz[remember picture,overlay]{\csname mr@arrows@\the\mr@lstid\endcsname}\fi}
+\def\mr@adrawgroups#1{\ifx\relax#1\else
+  \begin{ocg}{\csname mr@agname@\the\mr@lstid @#1\endcsname}{mr-a-\the\mr@lstid-#1}%
+    {\ifcsname mr@asrc@\the\mr@lstid @#1\endcsname 1\else 0\fi}%
+  \tikz[remember picture,overlay]{\mr@aband{mr-a-\the\mr@lstid-#1}{\csname mr@apt@\the\mr@lstid @#1\endcsname}{38}%
+    \csname mr@agroup@\the\mr@lstid @#1\endcsname}%
+  \end{ocg}%
+  \expandafter\mr@adrawgroups\fi}
+% the band of a name (node #1, variable #2, shade #3) of a shown group: it lies over the name,
+% multiplied with it as if behind it
+\def\mr@aband#1#2#3{\fill[\mr@acolorof{#2}!#3,blend mode=multiply,rounded corners=1pt](#1.south west)rectangle(#1.north east);}
+% a listing with arrows stays on one page: no line lets a page break follow it
+\lst@AddToHook{EveryPar}{\ifmr@active\ifcsname mr@arrows@\the\mr@lstid\endcsname\vadjust{\nobreak}\fi\fi}
+% where the code of the first line starts: the lane of the arrows is left of it
+\lst@AddToHook{EveryPar}{\ifmr@active\ifnum\mr@line=\z@\ifcsname mr@arrows@\the\mr@lstid\endcsname\ifdefined\tikz
+  \tikz[remember picture,overlay]\coordinate(mr-a-\the\mr@lstid-o);\fi\fi\fi\fi}
+% an arrow from a use (#1 line, #2 column) to its definition (#3, #4) of group #5: below the line of
+% the use (track #6), left in its lane (#8) beside the code, and below the line of the definition
+% (track #7) into it. Only below the lines, where no letters are. The helper gives segments that would
+% overlap tracks and lanes of their own, \mrArrowTrack and \mrArrowLane apart
+\def\mrArrowLane{1.8pt}\def\mrArrowGap{3.2pt}\def\mrArrowTrack{1pt}
+\def\mr@arrow#1#2#3#4#5#6#7#8{\edef\mr@t{mr-a-\the\mr@lstid}%
+  \draw[mr arrow,draw=\mr@acolorof{#5}]let\p1=(\mr@t-#1-#2.base),\p2=(\mr@t-#3-#4.base),\p3=(\mr@t-o),
+    \p4=(\mr@t-#1-#2.south),\p5=(\mr@t-#3-#4.south),
+    \n1={\mrArrowGap+\mrArrowTrack*#6},\n2={\mrArrowGap+\mrArrowTrack*#7},\n3={\mrArrowLane*(#8+1)} in
+    \ifnum#1=#3 (\x4,\y4)--(\x1,\y1-\n1)--(\x2,\y2-\n1)--(\x5,\y5);\else
+    (\x4,\y4)--(\x1,\y1-\n1)--(\x3-\n3,\y1-\n1)--(\x3-\n3,\y2-\n2)--(\x2,\y2-\n2)--(\x5,\y5);\fi}
+% the colors of the groups, in their order; more groups use these again
+\definecolor{mrarrow1}{HTML}{1E66F5}\definecolor{mrarrow2}{HTML}{DF8E1D}\definecolor{mrarrow3}{HTML}{40A02B}
+\definecolor{mrarrow4}{HTML}{8839EF}\definecolor{mrarrow5}{HTML}{D20F39}
+\ifmr@graphs\tikzset{mr arrow token/.style={inner sep=0pt,outer sep=0pt,rounded corners=1pt},
+  mr arrow/.style={->,>={Kite[length=2.6pt,width=2.2pt]},line width=.5pt,rounded corners=.8pt,opacity=.9}}\fi
+
+% Indices (key mrindex, option index): every symbol of a listing gets a subscript, in the style of
+% the IndexR of xlistings. usage numbers the uses of a symbol (x1, x2, ...), ssa the versions of a
+% variable: each definition is a new one, a use has the one of the definition it reads (flowR),
+% else the last one before. \mrUse{label}{x}{2} typesets x2 in the text and links to it.
+\def\mrIndexMark#1{\mr@nocopy{\smash{\kern-.5pt\textsubscript{\textcolor{xlst@colors@lst@comments}{\normalfont
+  \ttfamily\scriptsize#1}}\kern-.5pt}}}
+\let\mr@indexmode\mr@index
+\lst@Key{mrindex}\relax[usage]{\def\mr@indexmode{#1}}
+\def\mr@mode@usage{usage}\def\mr@mode@ssa{ssa}\def\mr@mode@none{none}
+\let\mr@defword\relax
+% from the aux file: word #2 of listing #1 is a definition; #1 definition (flowR place) has version #2
+\def\mr@occ#1#2{\csgdef{mr@occ@#1@#2}{}}
+\def\mr@ssav#1#2{\csgdef{mr@ssav@#1}{#2}}
+\def\mr@defocc#1{\mr@write{\string\mr@occ{\the\mr@lstid}{#1}}}
+\AtBeginDocument{\if@filesw\immediate\write\@auxout{\string\providecommand\string\mr@occ[2]{}%
+  \string\providecommand\string\mr@ssav[2]{}\string\providecommand\string\mr@lstlabel[3]{}%
+  \string\providecommand\string\mr@ixof[3]{}}\fi}
+\def\mr@lstlabel#1#2#3{\csgdef{mr@lbl@#1}{{#2}{#3}}}
+% from the aux file: the name at place #1 (a target) is #3, with the index #2 its listing shows
+\def\mr@ixof#1#2#3{\csgdef{mr@ixof@#1}{{#2}{#3}}}
+% the listing \mrUse and \mrUseAt refer to without a label: the last one with a name
+\let\mr@uselabel\@empty
+\lst@AddToHook{Init}{\ifx\mr@lstlabel@\@empty\else\xdef\mr@uselabel{\mr@lstlabel@}\fi}
+\lst@AddToHook{Output}{\ifmr@active\lst@ifkeywords\ifx\mr@indexmode\mr@mode@none
+  \ifx\mr@lstlabel@\@empty\else\mr@indexword\fi\else\mr@indexword\fi\fi\fi}
+\let\mr@lstlabel@\@empty
+\def\mr@indexword{\ifx\mr@role\mr@role@plain\else\ifx\lst@thestyle\mr@kwstyle\else
+  \expandafter\in@\expandafter:\expandafter{\mr@token}\ifin@\else
+  \expandafter\mr@isnumber\expandafter{\mr@token}\ifin@\else\mr@indexcount\fi\fi\fi\fi}
+% \mr@ix: the index of this occurrence, \mr@ixtarget its target; empty: none
+\def\mr@indexcount{\let\mr@ix\@empty
+  \edef\mr@ixkey{\the\mr@lstid @\mr@token}%
+  % a named listing without indices counts the uses for \mrUse, but shows nothing
+  \ifx\mr@indexmode\mr@mode@none\let\mr@ixmode\mr@mode@usage\let\mr@ixshow\@empty
+  \else\let\mr@ixmode\mr@indexmode\def\mr@ixshow{\mrIndexMark\mr@ix}\fi
+  \ifx\mr@ixmode\mr@mode@usage
+    \mr@ixnext{mr@ixn@\mr@ixkey}\global\expandafter\let\csname mr@ixn@\mr@ixkey\endcsname\mr@ix
+    \edef\mr@ixtarget{mr.u.\mr@ixkey.\mr@ix}%
+  \else\ifx\mr@role\mr@role@flow
+    \ifx\mr@flowlink\mr@flowplace\mr@ssanew\mr@ssaplace\mr@flowtarget
+    \else\ifcsname mr@ssav@\mr@flowtarget\endcsname\edef\mr@ix{\csname mr@ssav@\mr@flowtarget\endcsname}\fi\fi
+  \else\ifcsname mr@occ@\the\mr@lstid @\the\mr@word\endcsname\mr@ssanew
+  \else\ifcsname mr@ixv@\mr@ixkey\endcsname\edef\mr@ix{\csname mr@ixv@\mr@ixkey\endcsname}\fi\fi\fi
+    \edef\mr@ixtarget{mr.s.\mr@ixkey.\mr@ix}\fi
+  % the nth occurrence of the name in its line, for criteria like '3@[2]y'
+  \mr@cnext{mr@occn@\the\mr@lstid @\the\numexpr\mr@line+1\relax @\mr@token}%
+  \edef\mr@ixline{mr.l.\the\mr@lstid @\the\numexpr\mr@line+1\relax @\mr@token @\mr@cn}%
+  \edef\mr@ixcol{mr.c.\the\mr@lstid @\the\numexpr\mr@line+1\relax @\the\mr@col}%
+  \ifx\mr@ix\@empty\else\let\mr@ixstyle\lst@thestyle\let\lst@thestyle\mr@indexed\fi}
+% #1 counter: \mr@cn is its next value, which it keeps
+\def\mr@cnext#1{\ifcsname#1\endcsname\xdef\mr@cn{\the\numexpr\csname#1\endcsname+1}\else\gdef\mr@cn{1}\fi
+  \global\expandafter\let\csname#1\endcsname\mr@cn}
+% #1 counter: \mr@ix is its next value
+\def\mr@ixnext#1{\ifcsname#1\endcsname\xdef\mr@ix{\the\numexpr\csname#1\endcsname+1}\else\gdef\mr@ix{1}\fi}
+% a new version is read only after the line of its definition: 'x <- x + 1' reads the old one
+\def\mr@ssanew{\mr@ixnext{mr@ixd@\mr@ixkey}\global\expandafter\let\csname mr@ixd@\mr@ixkey\endcsname\mr@ix
+  \xdef\mr@ixlater{\unexpanded\expandafter{\mr@ixlater}\noexpand\csgdef{mr@ixv@\mr@ixkey}{\mr@ix}}}
+\let\mr@ixlater\@empty
+\lst@AddToHook{EOL}{\ifx\mr@ixlater\@empty\else\mr@ixlater\global\let\mr@ixlater\@empty\fi}
+% a definition flowR knows: its version for the uses that read it, also before it (aux file)
+\def\mr@ssaplace#1{\csxdef{mr@ssav@#1}{\mr@ix}\mr@write{\string\mr@ssav{#1}{\mr@ix}}}
+\def\mr@indexed#1{\mr@ixstyle{#1}\mr@ixplace\mr@ixtarget\mr@ixplace\mr@ixline\mr@ixplace\mr@ixcol\mr@ixshow
+  % the name and the index it shows at its places, for \mrUseAt
+  \ifx\mr@ixshow\@empty\let\mr@t\@empty\else\let\mr@t\mr@ix\fi
+  \mr@write{\string\mr@ixof{\mr@ixline}{\mr@t}{\mr@token}\string\mr@ixof{\mr@ixcol}{\mr@t}{\mr@token}}}
+\def\mr@ixplace#1{\ifcsname mr@ixplaced@#1\endcsname\else\csgdef{mr@ixplaced@#1}{}%
+  \ifdefined\hypertarget\mr@target{#1}\fi\fi}
+% \mrUseAt[label]{criterion}: the name at a criterion of the listing ('5@x', '5@[2]x' for the second x
+% of line 5, '5:3'), with the index the listing shows, linked to it; the label defaults to the last
+% listing with a name
+\NewDocumentCommand\mrUseAt{O{\mr@uselabel}m}{\ifcsname mr@lbl@#1\endcsname\expandafter\expandafter\expandafter
+  \mr@useat\csname mr@lbl@#1\endcsname{#2}\else\mr@r@pending\fi}
+% the criterion as a string: '@' and ':' whatever their catcodes
+\ExplSyntaxOn
+\cs_new_protected:Npn \mr@useat #1#2#3
+  {
+    \str_set:Ne \l_tmpa_str { \tl_to_str:n {#3} }
+    \regex_extract_once:nVNTF { \A(\d+)@(?:\[(\d+)\])?(.+)\Z } \l_tmpa_str \l_tmpa_seq
+      {
+        \tl_set:Ne \l_tmpa_tl
+          {
+            mr.l.#1 @ \seq_item:Nn \l_tmpa_seq { 2 } @ \seq_item:Nn \l_tmpa_seq { 4 }
+            @ \tl_if_blank:eTF { \seq_item:Nn \l_tmpa_seq { 3 } } { 1 } { \seq_item:Nn \l_tmpa_seq { 3 } }
+          }
+        \tl_set:Ne \l_tmpb_tl { \seq_item:Nn \l_tmpa_seq { 4 } }
+      }
+      {
+        \regex_extract_once:nVNT { \A(\d+):(\d+)\Z } \l_tmpa_str \l_tmpa_seq
+          { \tl_set:Ne \l_tmpa_tl { mr.c.#1 @ \seq_item:Nn \l_tmpa_seq { 2 } @ \seq_item:Nn \l_tmpa_seq { 3 } } }
+        \tl_set:NV \l_tmpb_tl \l_tmpa_str
+      }
+    \cs_if_exist:cTF { mr@ixof@ \l_tmpa_tl }
+      { \exp_args:NV \mr@usefound \l_tmpa_tl }
+      { \exp_args:NV \mr@uselink \l_tmpa_tl { \mbox { \ttfamily \l_tmpb_tl } } }
+  }
+\cs_generate_variant:Nn \regex_extract_once:nnNTF { nV }
+\cs_generate_variant:Nn \regex_extract_once:nnNT { nV }
+\ExplSyntaxOff
+\def\mr@usefound#1{\expandafter\expandafter\expandafter\mr@usefound@\csname mr@ixof@#1\endcsname{#1}}
+\def\mr@usefound@#1#2#3{\mr@uselink{#3}{\mr@use@{#2}{#1}}}
+\def\mr@uselink#1#2{\ifdefined\hyperlink\hyperlink{#1}{#2}\else#2\fi}
+% \mrUse[label]{symbol}{index}: the symbol with its index, linked to its place in the listing
+\NewDocumentCommand\mrUse{O{\mr@uselabel}mm}{\ifcsname mr@lbl@#1\endcsname\expandafter\expandafter\expandafter
+  \mr@use\csname mr@lbl@#1\endcsname{#2}{#3}\else\mr@r@pending\fi}
+\def\mr@use#1#2#3#4{\edef\mr@t{mr.\if s\@car#2\@nil s\else u\fi.#1@\detokenize{#3}.#4}%
+  \ifdefined\hyperlink\hyperlink{\mr@t}{\mr@use@{#3}{#4}}\else\mr@use@{#3}{#4}\fi}
+\def\mr@use@#1#2{\mbox{\ttfamily\detokenize{#1}\ifx\relax#2\relax\else\mrIndexMark{#2}\fi}}
+\lst@AddToHook{InitVarsBOL}{\global\mr@col\@ne}
+\lst@AddToHook{Output}{\global\advance\mr@col\lst@length}
+\lst@AddToHook{OutputOther}{\global\advance\mr@col\lst@length}
+\ExplSyntaxOn
+\str_new:N \l__mr_md_str
+\cs_new:Npn \__mr_helper_cmd:
+  {
+    \sys_if_platform_windows:TF
+      { for~/f~"delims="~\c_percent_str i~in~('kpsewhich~magic-r-flowr.mjs')~do~ \g__mr_node_tl \c_space_tl "\c_percent_str i" }
+      { \g__mr_node_tl \c_space_tl "\c_dollar_str(kpsewhich~magic-r-flowr.mjs)" }
+    \c_space_tl document \g__mr_helper_opts_tl
+    \c_space_tl \c__mr_code_str \c_space_tl \c__mr_answer_str
+  }
+\AtEndDocument
+  {
+    \bool_if:NT \g__mr_capture_bool
+      {
+        \iow_close:N \g__mr_code_iow
+        % the answer is stale if the code, the options, or the helper itself changed
+        \str_set:Ne \l__mr_md_str { \file_mdfive_hash:n { \c__mr_code_str } \file_mdfive_hash:n { magic-r-flowr.mjs }
+          \tl_to_str:N \g__mr_helper_opts_tl }
+        \file_if_exist:nF { \c__mr_answer_str } { \str_gclear:N \g__mr_flowr_md_str }
+        \str_if_eq:VVF \l__mr_md_str \g__mr_flowr_md_str
+          {
+            \file_if_exist:nTF { magic-r-flowr.mjs }
+              {
+                \__mr_run:VenVn \g__mr_flowr_run_str { \__mr_helper_cmd: } { flowR } \c__mr_answer_str
+                  { \A\\mrFlowrStatus }
+                \bool_if:NT \l__mr_ok_bool
+                  {
+                    \str_gset_eq:NN \g__mr_flowr_md_str \l__mr_md_str
+                    \msg_warning:nnn { magic-r } { rerun } { flowR }
+                  }
+              }
+              { \str_gset_eq:NN \g__mr_flowr_md_str \l__mr_md_str }
+          }
+        \__mr_aux:e { \token_to_str:N \mr@flowr@md { \g__mr_flowr_md_str } }
+      }
+  }
+\ExplSyntaxOff
+
+% R evaluates values (\mrValue), printed output (\mrEval), and sessions. Each
+% query names its context: the file it is answered in (\mrSource), and a
+% session its own environment. The runtime below is written to the script
+% first; it marks every answer with '@@mr:<n>@@' and ends it with its time
+% and whether it failed, '@@mr-stat:<ms>:ok@@'.
+\def\mr@R@runtime{Sys.setenv(LANGUAGE = "en"); options(width = 80, warn = 1);
+.mr <- new.env(); .mr$envs <- list();
+.mr$one <- function(s) paste(trimws(strsplit(s, "[[:cntrl:]]")[[1]]), collapse = " ");
+.mr$env <- function(ctx, file) { ctx <- paste0("@", ctx); if (is.null(.mr$envs[[ctx]])) { e <- new.env(parent = globalenv());
+  if (nzchar(file)) tryCatch(sys.source(file, envir = e), error = function(c) writeLines(paste("@@mr-load:", .mr$one(conditionMessage(c)))));
+  .mr$envs[[ctx]] <- e }; .mr$envs[[ctx]] };
+.mr$run <- function(x, e, mode, out) { err <- FALSE; res <- utils::capture.output(withCallingHandlers(tryCatch({
+  v <- withVisible(eval(x, e)); if (mode == "value") writeLines(paste(format(v$value), collapse = ", ")) else if (v$visible) print(v$value) },
+  error = function(c) { err <<- TRUE; writeLines(paste("Error:", .mr$one(conditionMessage(c)))) }),
+  warning = function(w) { writeLines(paste("Warning:", .mr$one(conditionMessage(w)))); invokeRestart("muffleWarning") },
+  message = function(m) { writeLines(sub("[[:space:]]+$", "", conditionMessage(m))); invokeRestart("muffleMessage") }));
+  if (length(res)) writeLines(paste0(out, res)); err };
+.mr$prompts <- function(buf) writeLines(paste0(c(":prompt:", rep(":cont:", length(buf) - 1)), buf));
+.mr$q <- function(marker, ctx, file, mode, lines) { writeLines(c("", paste0("@@mr:", marker, "@@"))); e <- .mr$env(ctx, file);
+  t0 <- proc.time()[[3]]; err <- FALSE;
+  if (mode == "session") { buf <- character(); for (l in lines) { if (!length(buf) && !nzchar(trimws(l))) next; buf <- c(buf, l);
+    p <- tryCatch(parse(text = buf, keep.source = FALSE), error = function(c) if (grepl("end of input", conditionMessage(c))) NULL else c);
+    if (is.null(p)) next; .mr$prompts(buf); buf <- character();
+    if (inherits(p, "error")) { err <- TRUE; writeLines(paste0(":out:Error: ", .mr$one(conditionMessage(p)))) } else for (x in p) err <- .mr$run(x, e, "print", ":out:") || err;
+    writeLines("@@step@@") };
+    if (length(buf)) { .mr$prompts(buf); err <- TRUE; writeLines(c(":out:Error: incomplete input", "@@step@@")) } }
+  else { p <- tryCatch(parse(text = lines, keep.source = FALSE), error = function(c) c);
+    if (inherits(p, "error")) { err <- TRUE; writeLines(paste("Error:", .mr$one(conditionMessage(p)))) } else for (x in p) err <- .mr$run(x, e, mode, "") || err };
+  writeLines(paste0("@@mr-stat:", round((proc.time()[[3]] - t0) * 1000), ":", if (err) "error" else "ok", "@@")) }}
+\ExplSyntaxOn
+\str_new:N \g__mr_r_run_str
+\str_gset:Nn \g__mr_r_run_str { auto }
+\tl_new:N \g__mr_r_cmd_tl
+\tl_gset:Nn \g__mr_r_cmd_tl { Rscript~--vanilla }
+\str_const:Ne \c__mr_r_script_str { \c_sys_jobname_str .mr-eval.R }
+\str_const:Ne \c__mr_r_out_str { \c_sys_jobname_str .mr-eval.out }
+\seq_new:N \g__mr_r_setup_seq
+\str_new:N \g__mr_r_ctx_str        % the file queries are answered in
+\seq_new:N \g__mr_r_queries_seq    % {ctx}{mode}{lines}{key}, in order
+\prop_new:N \g__mr_r_known_prop    % key -> {}
+\prop_new:N \g__mr_r_answers_prop  % key -> {line}{line}...
+\prop_new:N \g__mr_r_stats_prop    % key -> {ms}{ok|error}
+\prop_new:N \g__mr_r_loaderr_prop  % key -> message of sourcing its file
+\prop_new:N \g__mr_r_keys_prop     % marker -> key
+\str_new:N \g__mr_r_md_str
+\bool_new:N \g__mr_r_rerun_bool
+\bool_new:N \g_mr_r_error_bool     % the last query failed
+\bool_new:N \l_mr_r_pending_bool   % the last query has no answer yet
+\tl_new:N \l_mr_r_lines_tl         % the answer of the last query
+\str_new:N \l_mr_r_answer_str      % ... in one line
+\str_new:N \g_mr_r_ms_str          % the time of the last query in ms
+\str_new:N \l__mr_key_str
+\str_new:N \l__mr_marker_str
+\str_new:N \l__mr_tmp_str
+\tl_new:N \l__mr_tmp_tl
+\seq_new:N \l__mr_buffer_seq
+\seq_new:N \l__mr_match_seq
+\int_new:N \l__mr_n_int
+\cs_generate_variant:Nn \prop_gput:Nnn { NVe }
+\str_const:Ne \c__mr_nl_str { \char_generate:nn { 10 } { 12 } }
+
+% from the aux file: marker #1 answers the query with key #2 (hex)
+\cs_new_protected:Npn \mr@r@key #1#2
+  {
+    \str_set_convert:Nnnn \l__mr_key_str {#2} { utf8/hex } { }
+    \prop_gput:NnV \g__mr_r_keys_prop {#1} \l__mr_key_str
+  }
+\cs_new_protected:Npn \mr@r@md #1 { \str_gset:Nn \g__mr_r_md_str {#1} }
+\cs_new_protected:Npn \__mr_r_read:
+  {
+    \str_clear:N \l__mr_marker_str
+    \ior_open:Nn \g__mr_ior { \c__mr_r_out_str }
+    \ior_str_map_inline:Nn \g__mr_ior
+      {
+        \regex_extract_once:nnNTF { \A@@mr:(.*)@@\Z } {##1} \l__mr_match_seq
+          {
+            \str_set:Ne \l__mr_tmp_str { \seq_item:Nn \l__mr_match_seq { 2 } }
+            \__mr_r_flush:
+            \str_set_eq:NN \l__mr_marker_str \l__mr_tmp_str
+          }
+          { \str_if_empty:nF {##1} { \seq_put_right:Nn \l__mr_buffer_seq {##1} } }
+      }
+    \__mr_r_flush:
+    \ior_close:N \g__mr_ior
+  }
+\str_new:N \l__mr_line_str
+\cs_new_protected:Npn \__mr_r_flush:
+  {
+    \prop_get:NVNT \g__mr_r_keys_prop \l__mr_marker_str \l__mr_key_str
+      {
+        \seq_get_right:NNT \l__mr_buffer_seq \l__mr_line_str
+          {
+            \regex_extract_once:nVNT { \A@@mr-stat:(\d+):(\w+)@@\Z } \l__mr_line_str \l__mr_match_seq
+              {
+                \seq_pop_right:NN \l__mr_buffer_seq \l__mr_line_str
+                \prop_gput:NVe \g__mr_r_stats_prop \l__mr_key_str
+                  { { \seq_item:Nn \l__mr_match_seq { 2 } } { \seq_item:Nn \l__mr_match_seq { 3 } } }
+              }
+          }
+        \seq_get_left:NNT \l__mr_buffer_seq \l__mr_line_str
+          {
+            \regex_extract_once:nVNT { \A@@mr-load:\ (.*)\Z } \l__mr_line_str \l__mr_match_seq
+              {
+                \seq_pop_left:NN \l__mr_buffer_seq \l__mr_line_str
+                \prop_gput:NVe \g__mr_r_loaderr_prop \l__mr_key_str { \seq_item:Nn \l__mr_match_seq { 2 } }
+              }
+          }
+        \prop_gput:NVe \g__mr_r_answers_prop \l__mr_key_str
+          { \seq_map_function:NN \l__mr_buffer_seq \__mr_braced:n }
+      }
+    \seq_clear:N \l__mr_buffer_seq
+  }
+\cs_new:Npn \__mr_braced:n #1 { { \exp_not:n {#1} } }
+
+\AtBeginDocument
+  {
+    \file_if_exist:nT { \c__mr_r_out_str } { \__mr_r_read: }
+    \__mr_aux:e
+      {
+        \token_to_str:N \providecommand \token_to_str:N \mr@r@key [2] { }
+        \token_to_str:N \providecommand \token_to_str:N \mr@r@md [1] { }
+      }
+  }
+
+% the script: the runtime, the setup, then every query as .mr$q("<n>", ctx,
+% file, mode, c(lines)), each line an R raw string
+\cs_new:Npn \__mr_r_raw:n #1 { r"-( #1 )-" }
+\cs_new:Npn \__mr_r_file:w #1 | #2 \q_stop {#1}
+\cs_new_protected:Npn \__mr_r_write:
+  {
+    \iow_open:Nn \g__mr_iow { \c__mr_r_script_str }
+    \iow_now:Ne \g__mr_iow { \exp_after:wN \tl_to_str:n \exp_after:wN { \mr@R@runtime } }
+    \seq_map_inline:Nn \g__mr_r_setup_seq { \iow_now:Nn \g__mr_iow {##1} }
+    \int_zero:N \l__mr_n_int
+    \seq_map_inline:Nn \g__mr_r_queries_seq { \__mr_r_write:nnnn ##1 }
+    \iow_close:N \g__mr_iow
+  }
+% #1 context, #2 mode, #3 lines, #4 key
+\cs_new_protected:Npn \__mr_r_write:nnnn #1#2#3#4
+  {
+    \int_incr:N \l__mr_n_int
+    \str_set_convert:Nnnn \l__mr_key_str {#4} { } { utf8/hex }
+    \__mr_aux:e { \token_to_str:N \mr@r@key { \int_use:N \l__mr_n_int } { \l__mr_key_str } }
+    \iow_now:Ne \g__mr_iow
+      {
+        .mr \c_dollar_str q(" \int_use:N \l__mr_n_int ", ~ \__mr_r_raw:n {#1}, ~
+        \__mr_r_raw:n { \__mr_r_file:w #1 | \q_stop }, ~ "#2", ~ c(
+      }
+    \exp_args:NNV \seq_set_split_keep_spaces:Nnn \l__mr_buffer_seq \c__mr_nl_str {#3}
+    \seq_map_indexed_inline:Nn \l__mr_buffer_seq
+      { \iow_now:Ne \g__mr_iow { \int_compare:nNnF {##1} = 1 { , } \__mr_r_raw:n {##2} } }
+    \iow_now:Nn \g__mr_iow { )) }
+  }
+
+\AtEndDocument
+  {
+    \seq_if_empty:NF \g__mr_r_queries_seq
+      {
+        \__mr_r_write:
+        \str_set:Ne \l__mr_key_str { \file_mdfive_hash:n { \c__mr_r_script_str } }
+        \file_if_exist:nF { \c__mr_r_out_str } { \str_gclear:N \g__mr_r_md_str }
+        \str_if_eq:VVF \l__mr_key_str \g__mr_r_md_str
+          {
+            \__mr_run:VenVn \g__mr_r_run_str
+              { \g__mr_r_cmd_tl \c_space_tl \c__mr_r_script_str \c_space_tl > \c_space_tl \c__mr_r_out_str \c_space_tl 2>&1 }
+              { R } \c__mr_r_out_str { \A@@mr: }
+            \bool_if:NT \l__mr_ok_bool { \str_gset_eq:NN \g__mr_r_md_str \l__mr_key_str }
+            \bool_gset_true:N \g__mr_r_rerun_bool
+          }
+        \__mr_aux:e { \token_to_str:N \mr@r@md { \g__mr_r_md_str } }
+        \bool_if:NT \g__mr_r_rerun_bool { \msg_warning:nnn { magic-r } { rerun } { R } }
+      }
+  }
+
+% #1 lines (a string, lines separated by ^^J), #2 mode: value, print, or session
+\cs_new_protected:Npn \__mr_r_query:nn #1#2
+  {
+    \str_set:Ne \l__mr_key_str { \g__mr_r_ctx_str ~>>>~ #2 ~>>>~ #1 }
+    \prop_if_in:NVF \g__mr_r_known_prop \l__mr_key_str
+      {
+        \prop_gput:NVn \g__mr_r_known_prop \l__mr_key_str { }
+        \seq_gput_right:Ne \g__mr_r_queries_seq { { \g__mr_r_ctx_str } {#2} {#1} { \l__mr_key_str } }
+      }
+    \prop_get:NVNTF \g__mr_r_answers_prop \l__mr_key_str \l_mr_r_lines_tl
+      { \bool_set_false:N \l_mr_r_pending_bool }
+      {
+        \tl_clear:N \l_mr_r_lines_tl
+        \bool_set_true:N \l_mr_r_pending_bool
+        \bool_gset_true:N \g__mr_r_rerun_bool
+      }
+    \str_set:Ne \l_mr_r_answer_str
+      { \tl_trim_spaces:e { \tl_map_function:NN \l_mr_r_lines_tl \__mr_spaced:n } }
+    \str_gclear:N \g_mr_r_ms_str
+    \bool_gset_eq:NN \g_mr_r_error_bool \l_mr_r_pending_bool
+    \prop_get:NVNT \g__mr_r_stats_prop \l__mr_key_str \l__mr_tmp_tl
+      { \exp_after:wN \__mr_r_stats:nn \l__mr_tmp_tl }
+    \bool_if:NT \g_mr_r_error_bool
+      {
+        \bool_lazy_or:nnF { \l_mr_r_pending_bool } { \str_if_eq_p:nn {#2} { session } }
+          { \msg_warning:nnnV { magic-r } { r-error } {#1} \l_mr_r_answer_str }
+      }
+    \prop_get:NVNT \g__mr_r_loaderr_prop \l__mr_key_str \l__mr_tmp_str
+      { \msg_warning:nnVV { magic-r } { r-load } \g__mr_r_ctx_str \l__mr_tmp_str }
+  }
+\cs_new:Npn \__mr_spaced:n #1 { ~ #1 }
+\cs_new_protected:Npn \__mr_r_stats:nn #1#2
+  {
+    \str_gset:Nn \g_mr_r_ms_str {#1}
+    \str_if_eq:nnT {#2} { error } { \bool_gset_true:N \g_mr_r_error_bool }
+  }
+\cs_new_protected:Npn \__mr_r_show:n #1
+  {
+    \bool_if:NTF \l_mr_r_pending_bool { \mr@r@pending }
+      { \bool_if:NTF \g_mr_r_error_bool { \exp_args:NV \mr@r@error \l_mr_r_answer_str } {#1} }
+  }
+
+% the text of a regular argument, undoing what TeX did to it: a space after a
+% control word ('\n ' of '"a\nb"'), escaped characters
+\str_new:N \l__mr_arg_str
+\cs_new_protected:Npn \__mr_arg:n #1
+  {
+    \tl_set:Nn \l__mr_tmp_tl {#1}
+    \regex_replace_all:nnN { \cP. } { \cO\# } \l__mr_tmp_tl
+    \str_set:NV \l__mr_arg_str \l__mr_tmp_tl
+    \regex_replace_all:nnN { (\\[A-Za-z]+)\ ([^A-Za-z0-9._]|\Z) } { \1\2 } \l__mr_arg_str
+    \regex_replace_all:nnN { \\([\%\#\&\$\_\{\}]) } { \1 } \l__mr_arg_str
+    \str_set:Ne \l__mr_arg_str { \tl_trim_spaces:V \l__mr_arg_str }
+  }
+% \mrValue{expr} (verbatim) and \mrValueOf{expr}: the value as text; \mrEval
+% and \mrEvalOf: what R prints, as code
+\NewDocumentCommand \mrValue { v } { \__mr_value:n {#1} }
+\NewDocumentCommand \mrValueOf { m } { \__mr_arg:n {#1} \exp_args:NV \__mr_value:n \l__mr_arg_str }
+\NewDocumentCommand \mrEval { v } { \__mr_eval:n {#1} }
+\NewDocumentCommand \mrEvalOf { m } { \__mr_arg:n {#1} \exp_args:NV \__mr_eval:n \l__mr_arg_str }
+\cs_new_protected:Npn \__mr_value:n #1
+  {
+    \exp_args:Ne \__mr_r_query:nn { \tl_trim_spaces:n {#1} } { value }
+    \__mr_r_show:n { \exp_args:NV \mr@r@value \l_mr_r_answer_str }
+  }
+\cs_new_protected:Npn \__mr_eval:n #1
+  {
+    \exp_args:Ne \__mr_r_query:nn { \tl_trim_spaces:n {#1} } { print }
+    \__mr_r_show:n { \exp_args:NV \mr@r@format \l_mr_r_answer_str }
+  }
+\NewDocumentCommand \mrValueInto { m m }
+  {
+    \__mr_arg:n {#2}
+    \exp_args:NV \__mr_r_query:nn \l__mr_arg_str { value }
+    \tl_set:NV #1 \l_mr_r_answer_str
+  }
+\NewDocumentCommand \mrIfError { +m +m } { \bool_if:NTF \g_mr_r_error_bool {#1} {#2} }
+\cs_new:Npn \mrRTime { \str_use:N \g_mr_r_ms_str }
+\NewDocumentCommand \mrRTimeText { } { \str_if_empty:NTF \g_mr_r_ms_str { \mr@r@pending } { \g_mr_r_ms_str \,ms } }
+\NewDocumentCommand \mrSource { m } { \str_gset:Ne \g__mr_r_ctx_str {#1} }
+\NewDocumentCommand \mrSourceOff { } { \str_gclear:N \g__mr_r_ctx_str }
+\NewDocumentCommand \mrRSetup { v } { \seq_gput_right:Nn \g__mr_r_setup_seq {#1} }
+\NewDocumentCommand \mrRCommand { m } { \tl_gset:Nn \g__mr_r_cmd_tl {#1} }
+\NewDocumentCommand \mrRRun { m } { \str_gset:Nn \g__mr_r_run_str {#1} }
+
+% \begin{rsession}[animate, start=2, listing={...}] inputs \end{rsession}: R
+% runs the lines like its console, an input may span lines; on beamer slides
+% the inputs appear one after the other. The catcodes turn verbatim before
+% the options are read, they are read again with the usual catcodes.
+\int_new:N \g__mr_session_int
+\seq_new:N \l__mr_steps_seq
+\seq_new:N \l__mr_lines_seq
+\tl_new:N \l__mr_step_tl
+\str_new:N \l__mr_file_str
+\str_new:N \l__mr_ctx_str
+\tl_new:N \l__mr_opts_tl
+\tl_new:N \g__mr_opts_tl
+\tl_new:N \l__mr_listing_tl
+\bool_new:N \l__mr_animate_bool
+\int_new:N \l__mr_start_int
+\keys_define:nn { magic-r / session }
+  {
+    animate .bool_set:N = \l__mr_animate_bool ,
+    start   .int_set:N  = \l__mr_start_int ,
+    listing .tl_set:N   = \l__mr_listing_tl ,
+  }
+\cs_new_protected:Npn \__mr_session:nn #1#2
+  {
+    \group_begin:
+    \bool_set:Nn \l__mr_animate_bool { \cs_if_exist_p:c { ver@beamer.cls } }
+    \int_set:Nn \l__mr_start_int { 1 }
+    \keys_set:nn { magic-r / session } {#1}
+    \int_gincr:N \g__mr_session_int
+    \seq_clear:N \l__mr_lines_seq
+    \ior_open:Nn \g__mr_ior {#2}
+    \ior_str_map_inline:Nn \g__mr_ior { \seq_put_right:Nn \l__mr_lines_seq {##1} }
+    \ior_close:N \g__mr_ior
+    % a session is an environment of its own, named by its inputs, as beamer
+    % typesets a frame once per overlay
+    \str_set:Ne \l__mr_ctx_str { \exp_args:NNV \seq_use:Nn \l__mr_lines_seq \c__mr_nl_str }
+    \str_set_eq:NN \l__mr_tmp_str \g__mr_r_ctx_str
+    \str_gset:Ne \g__mr_r_ctx_str { \g__mr_r_ctx_str | \exp_args:NV \str_mdfive_hash:n \l__mr_ctx_str }
+    \exp_args:NV \__mr_r_query:nn \l__mr_ctx_str { session }
+    \str_gset_eq:NN \g__mr_r_ctx_str \l__mr_tmp_str
+    % the steps: the lines of R up to each '@@step@@'
+    \seq_clear:N \l__mr_steps_seq
+    \tl_clear:N \l__mr_step_tl
+    \bool_if:NTF \l_mr_r_pending_bool
+      { \seq_put_right:Ne \l__mr_steps_seq { \seq_map_function:NN \l__mr_lines_seq \__mr_prompt:n } }
+      {
+        \tl_map_inline:Nn \l_mr_r_lines_tl
+          {
+            \str_if_eq:nnTF {##1} { @@step@@ }
+              { \seq_put_right:NV \l__mr_steps_seq \l__mr_step_tl \tl_clear:N \l__mr_step_tl }
+              { \tl_put_right:Nn \l__mr_step_tl { {##1} } }
+          }
+        \tl_if_empty:NF \l__mr_step_tl { \seq_put_right:NV \l__mr_steps_seq \l__mr_step_tl }
+      }
+    \int_set:Nn \l__mr_n_int { \seq_count:N \l__mr_steps_seq }
+    \bool_if:NTF \l__mr_animate_bool
+      {
+        \int_step_inline:nn { \l__mr_n_int }
+          {
+            \__mr_session_file:n {##1}
+            \use:e
+              {
+                \exp_not:N \only
+                < \int_eval:n { \l__mr_start_int + ##1 - 1 } \int_compare:nNnT {##1} = \l__mr_n_int { - } >
+              }
+              { \__mr_session_typeset: }
+          }
+      }
+      { \__mr_session_file:n { \int_use:N \l__mr_n_int } \__mr_session_typeset: }
+    \group_end:
+  }
+\cs_new:Npn \__mr_prompt:n #1 { { :prompt: #1 } }
+% the session up to step #1; later steps are blank lines, so that every
+% overlay has the same height
+\cs_new_protected:Npn \__mr_session_file:n #1
+  {
+    \str_set:Ne \l__mr_file_str { \c_sys_jobname_str -mr-session- \int_use:N \g__mr_session_int - #1 .txt }
+    \iow_open:Nn \g__mr_iow { \l__mr_file_str }
+    \seq_map_indexed_inline:Nn \l__mr_steps_seq
+      { \tl_map_inline:nn {##2} { \iow_now:Ne \g__mr_iow { \int_compare:nNnF {##1} > {#1} { \exp_not:n {####1} } } } }
+    \iow_close:N \g__mr_iow
+  }
+\cs_new_protected:Npn \__mr_session_typeset:
+  {
+    \use:e
+      {
+        \exp_not:N \mr@r@input { lRConsole }
+          { numbers=none, showlines=true, \exp_not:V \l__mr_listing_tl } { \l__mr_file_str }
+      }
+  }
+\NewDocumentCommand \mrSessionSetup { m } { \tl_gset:Nn \g__mr_opts_tl {#1} }
+\newenvironment { rsession }
+  {
+    \tl_set_eq:NN \l__mr_opts_tl \g__mr_opts_tl
+    \cs_set_eq:NN \do \@makeother \dospecials \char_set_catcode_active:N \^^M
+    \peek_meaning:NTF [ \__mr_session_opts:w \__mr_session_start:
+  }
+  {
+    \iow_close:N \g__mr_iow
+    \exp_args:NV \__mr_session:nn \l__mr_opts_tl { \c_sys_jobname_str -mr-session.tmp }
+  }
+\cs_new_protected:Npn \__mr_session_opts:w [ #1 ]
+  {
+    \tl_set_rescan:Nnn \l__mr_tmp_tl
+      {
+        \char_set_catcode_escape:N \\ \char_set_catcode_group_begin:N \{
+        \char_set_catcode_group_end:N \} \char_set_catcode_space:N \ %
+      }
+      {#1}
+    \tl_put_right:Ne \l__mr_opts_tl { , \exp_not:V \l__mr_tmp_tl }
+    \__mr_session_start:
+  }
+\cs_new_protected:Npn \__mr_session_start:
+  {
+    \iow_open:Nn \g__mr_iow { \c_sys_jobname_str -mr-session.tmp }
+    \cs_set_protected:Npn \verbatim@processline { \iow_now:Ne \g__mr_iow { \the \verbatim@line } }
+    \verbatim@start
+  }
+\ExplSyntaxOff
+
+% listings do not nest: within one (e.g. in an escape) answers are plain text
+\def\mr@r@format#1{\ifnum\lst@mode=\lst@nomode\csname b\mrLanguage\endcsname{#1}\else#1\fi}
+\def\mr@r@value#1{#1}
+\def\mr@r@error#1{\textcolor{mrerror}{\textbf{??}}}
+\def\mr@r@pending{\textbf{??}}
+\newcommand*\mrEvalSetFormat[1]{\def\mr@r@format##1{#1}}
+\newcommand*\mrValueSetFormat[1]{\def\mr@r@value##1{#1}}
+\newcommand*\mrSetErrorFormat[1]{\def\mr@r@error##1{#1}}
+% #1 language, #2 options, #3 file; in the style of the fakeminted environment
+\def\mr@r@input#1#2#3{\begingroup
+  \ifdefined\xlst@minted@style
+    \protected@edef\mr@t{style=\pgfkeysvalueof{/xlst@lst@family/\xlst@minted@style/listing style},}%
+  \else\def\mr@t{}\fi
+  \expandafter\endgroup\expandafter\lstinputlisting\expandafter[\mr@t language=#1,#2]{#3}}
+
+% an R file written from the document, typeset, and the context of the
+% queries that follow; #1 listing options, #2 file name
+\newenvironment{mrfile}[2][]{%
+  \def\mr@r@file{#2}\def\mr@r@fileopts{#1}%
+  \begingroup\let\do\@makeother\dospecials\catcode`\^^M\active
+  \def\verbatim@processline{\immediate\write\mr@r@out{\the\verbatim@line}}%
+  \immediate\openout\mr@r@out=#2\relax\verbatim@start}
+  {\immediate\closeout\mr@r@out\endgroup
+  \mrSource{\mr@r@file}%
+  \edef\mr@t{\noexpand\mr@r@input{lMagicR}{\unexpanded\expandafter{\mr@r@fileopts}}{\mr@r@file}}\mr@t}
+\newwrite\mr@r@out
+\endinput

@@ -1,0 +1,14 @@
+# The packages of the shipped database magic-r-links.cfg, regenerate it with
+#   node magic-r-flowr.mjs generate
+# a document's other packages come from flowR while it compiles.
+# R's own packages
+base methods datasets utils grDevices graphics stats tools parallel grid splines stats4 compiler tcltk
+# R's recommended packages
+MASS Matrix lattice survival nlme boot cluster codetools foreign KernSmooth rpart class nnet spatial mgcv
+# the tidyverse (tidyverse::tidyverse_packages()) and its helpers
+tidyverse broom conflicted cli dbplyr dplyr dtplyr forcats ggplot2 googledrive googlesheets4 haven hms httr
+jsonlite lubridate magrittr modelr pillar purrr ragg readr readxl reprex rlang rstudioapi rvest stringr tibble
+tidyr xml2 tidyselect glue withr vctrs lifecycle scales
+# other popular packages
+fs here R6 patchwork data.table yaml httr2 curl writexl DBI RSQLite testthat devtools usethis roxygen2 knitr
+rmarkdown shiny Rcpp lme4 caret randomForest car zoo xts future furrr plotly igraph

@@ -1,0 +1,20 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: raw strings and escapes
+TARGET: mr.2.x
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+TARGET: mr.2.y
+COPY: <-
+INTERNAL: mr.2.x
+============================================================
+TEST 1: the code
+============================================================
+CODE: ## magic-r block 1
+CODE: x <- y
+CODE: ## magic-r block 2
+CODE: x <- r"(sum "of" mean)" + R'-[it's sum]-' + sum(1)
+CODE: y <- mean(x) + 1 # note
+CODE: 
+============================================================

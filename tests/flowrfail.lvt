@@ -1,0 +1,14 @@
+% A failure of flowR is a warning, the links come from the database.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks]{magic-r}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\START
+\TEST{failure}{\mrFlowrStatus{failed}{node: not flowR; web: fetch failed}}
+\TEST{success}{\mrFlowrStatus{ok}{node flowR 2.15.10}}
+\TEST{a listing flowR could not parse}{\mrFlowrSkipped{3}}
+\TEST{still linked}{\Typeset{\bmr{paste}}}
+\END

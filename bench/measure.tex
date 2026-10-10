@@ -1,0 +1,55 @@
+% Times one variant of one case of bench/cases.txt from inside the document and
+% writes avg|min|max (tenths of a ms) to bench-stat.txt. bench/run.sh drives
+% this file, twice per variant: the second run reads what the first wrote
+% (definitions in the aux file, the answer of flowR).
+%   xlistings    the R of xlistings, no links (the baseline)
+%   magic-r      magic-r with its database, nothing from the aux file
+%   definitions  magic-r with the definitions of the document
+%   flowr        magic-r with the answer of flowR
+\documentclass{article}
+\providecommand\mrbenchruns{5}
+\providecommand\mrbenchlines{10}
+\providecommand\mrbenchvariant{magic-r}
+\providecommand\mrbenchflowr{off}
+\providecommand\mrbenchflowropts{}
+\usepackage[flowr=\mrbenchflowr,dependencies]{magic-r}
+\expandafter\mrFlowrOptions\expandafter{\mrbenchflowropts}
+\LoadLanguages{R}
+\usepackage{hyperref}
+
+\makeatletter
+% the timer counts in units of 1/65536 s, the table shows tenths of a ms
+\newcount\mr@bench@t
+\newcount\mr@bench@total
+\newcount\mr@bench@min
+\newcount\mr@bench@max
+\newcount\mr@bench@i
+\def\mr@bench@tenths{\numexpr\pdfelapsedtime*625/4096\relax}
+\def\mr@bench@repeat#1#2{%
+   \mr@bench@total\z@ \mr@bench@min\maxdimen \mr@bench@max\z@ \mr@bench@i\z@
+   \@whilenum\mr@bench@i<#1\do{%
+      \pdfresettimer
+      #2%
+      \mr@bench@t\mr@bench@tenths
+      \advance\mr@bench@total\mr@bench@t
+      \ifnum\mr@bench@t<\mr@bench@min \mr@bench@min\mr@bench@t \fi
+      \ifnum\mr@bench@t>\mr@bench@max \mr@bench@max\mr@bench@t \fi
+      \advance\mr@bench@i\@ne
+   }%
+   \divide\mr@bench@total#1\relax}
+\def\mr@bench@file{bench/sample-\mrbenchlines.R}
+\def\mr@bench@x{xlistings}
+\def\mr@bench@m{magic-r}
+\edef\mr@bench@keys{\ifx\mrbenchvariant\mr@bench@x language=lR\else language=lMagicR\fi
+   \ifx\mrbenchvariant\mr@bench@m,mrdefinitions=false,mrcapture=false\fi}
+\newwrite\mr@bench@out
+\begin{document}
+% one listing that is not timed: fonts and the like
+\setbox\z@\vbox{\bmr{x <- mean(1)}}
+\edef\mr@t{\noexpand\lstinputlisting[\mr@bench@keys]{\mr@bench@file}}
+\mr@bench@repeat\mrbenchruns{\setbox\z@\vbox{\mr@t}}
+\immediate\openout\mr@bench@out=bench-stat.txt
+\immediate\write\mr@bench@out{\the\mr@bench@total|\the\mr@bench@min|\the\mr@bench@max}
+\immediate\closeout\mr@bench@out
+The times are in \texttt{bench-stat.txt}.
+\end{document}

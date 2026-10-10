@@ -1,0 +1,19 @@
+% The option symbols: operators are symbols that copy as their text. Backtick
+% names do not link without flowR, and lint findings mark their tokens.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,symbols,lint]{magic-r}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\START
+\TEST{symbols}{\Typeset{\bmr{x <- y |> f() && z != 1 -> w}}}
+\TEST{backtick names}{\Typeset{\bmr{`mean value` + `sum`(1)}}}
+\BeginBox{lint}
+\begin{mr}
+unused <- read.csv("/tmp/x.csv")
+mean(1)
+\end{mr}
+\EndBox
+\END

@@ -1,0 +1,22 @@
+% The database: lazy packages, topics, other pages, replacement, operators.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\mrPackage{late}{1.0}{\N{one,}\T{Topic}{two,three,}}
+\mrPackage{replaced}{1.0}{\N{old,}}
+\mrPackage{replaced}{2.0}{\N{new,}}
+\mrOperators{\%+\%,\%conditions\%}
+\mrPackage{ops}{1.0}{\T{plus}{\%+\%,}\T{conds}{\%conditions\%,}}
+\begin{document}
+\WarmUp
+\START
+\TEST{not read before use}{\TYPE{\ifcsname mr@K@one\endcsname read\else unread\fi}}
+\TEST{topics}{\mrAttach{late}\Typeset{\bmr{one two three}}}
+\TEST{a later entry replaces}{\mrAttach{replaced}\Typeset{\bmr{old new}}\TYPE{\mrVersion{replaced}}}
+\TEST{read once}{\mrPackage{late}{9}{\N{four,}}\Typeset{\bmr{one four}}\TYPE{\mrVersion{late}}}
+\TEST{operators}{\mrAttach{ops}\Typeset{\bmr{a \%+\% b \%conditions\% c}}}
+\TEST{docs elsewhere}{\def\mrDocsCran{https://example.org}\Typeset{\bmr{one}}\def\mrCran{https://cran.example/}\Typeset{\bmr{late::one}}}
+\TEST{links of the document}{\mrAddLink{https://example.org/a}{paste,mine}\mrNoLink{c}\Typeset{\bmr{paste mine c base::c sum}}}
+\TEST{the R manual}{\def\mrDocsRManual{https://r.example}\Typeset{\bmr{paste base::c}}}
+\END

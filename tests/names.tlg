@@ -1,0 +1,94 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: whole words
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Log.html
+============================================================
+============================================================
+TEST 2: next to punctuation
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+============================================================
+============================================================
+TEST 3: digits
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Log.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/Log.html
+============================================================
+============================================================
+TEST 4: strings
+============================================================
+============================================================
+============================================================
+TEST 5: comments
+============================================================
+============================================================
+============================================================
+TEST 6: qualified
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/sd.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/00Index.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+LINK: https://cran.r-project.org/package=dplyr
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+============================================================
+============================================================
+TEST 7: internal
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/sd.html
+============================================================
+============================================================
+TEST 8: unknown in a package
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+============================================================
+============================================================
+TEST 9: sequences
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+============================================================
+============================================================
+TEST 10: members
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+============================================================
+============================================================
+TEST 11: operators
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+============================================================
+============================================================
+TEST 12: pipes
+============================================================
+LINK: https://rdrr.io/cran/dplyr/man/reexports.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+COPY: |>
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/mean.html
+============================================================
+============================================================
+TEST 13: other urls
+============================================================
+LINK: https://example.org/other#only
+============================================================
+============================================================
+TEST 14: keywords
+============================================================
+============================================================
+============================================================
+TEST: a block
+TARGET: mr.16.res
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/median.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/paste.html
+INTERNAL: mr.16.res

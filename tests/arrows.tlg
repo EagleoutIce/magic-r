@@ -1,0 +1,26 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+TARGET: mr.2.total
+TOGGLE: mr-a-2-1-1
+COPY: <-
+TARGET: mr.2.v
+TOGGLE: mr-a-2-2-1
+COPY: <-
+COPY: <-
+TOGGLE: mr-a-2-3-10
+TOGGLE: mr-a-2-3-18
+OCG: total (3) mr-a-2-3-10 1
+ARROW: 3:10 -> 1:1 group 1
+OCG: total (1) mr-a-2-1-1 0
+ARROW: 3:10 -> 1:1 group 1
+OCG: v (3) mr-a-2-3-18 0
+ARROW: 3:18 -> 2:1 group 2
+OCG: v (2) mr-a-2-2-1 0
+ARROW: 3:18 -> 2:1 group 2
+---- not interactive
+TARGET: mr.3.x
+COPY: <-
+TARGET: mr.3.y
+COPY: <-
+INTERNAL: mr.3.x
+ARROW: 2:6 -> 1:1 group 1

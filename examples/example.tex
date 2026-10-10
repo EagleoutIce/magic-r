@@ -1,0 +1,51 @@
+\documentclass{scrartcl}
+\usepackage[T1]{fontenc}
+\usepackage{newpxtext,newpxmath}
+\usepackage[varqu,varl,scale=.95]{inconsolata}
+\usepackage{csquotes}
+\usepackage[eval,graphs,dependencies,xlistings={style={plain number}}]{magic-r}
+% a calm palette (after Catppuccin Latte) through the colors of xlistings
+\definecolor{plum}{HTML}{9B1B6E}         \definecolor{latte-blue}{HTML}{1E66F5}
+\definecolor{latte-green}{HTML}{40A02B}  \definecolor{latte-text}{HTML}{4C4F69}
+\definecolor{latte-subtle}{HTML}{9CA0B0}
+\lstcolorlet{keywordA}{plum}             % keywords
+\lstcolorlet{keywordB}{latte-blue}       % packages
+\lstcolorlet{keywordC}{latte-text}       % functions, marked by their links
+\lstcolorlet{numbers}{latte-blue}
+\lstcolorlet{literals}{latte-green}
+\lstcolorlet{comments}{latte-subtle}
+\usepackage[hidelinks]{hyperref}
+\setkomafont{disposition}{\rmfamily\bfseries}
+\begin{document}
+\section*{Tidy summaries}
+Every name of a package links to its help page, packages attach where the code loads them, and
+operators become \enquote{ligatures} that still copy as the original text:
+\begin{minted}{mr}
+library(dplyr)
+library(ggplot2)
+
+by_cyl <- function(data) {
+  data |>
+    group_by(cyl) |>
+    summarise(mpg = mean(mpg), n = n())
+}
+ggplot(by_cyl(mtcars), aes(cyl, mpg)) + geom_col()
+\end{minted}
+Inline, too: \bmr{stats::filter(1:10, rep(1/3, 3))}. R knows the answer: the cars average
+\mrValue{round(mean(mtcars$mpg), 1)} miles per gallon. And a session:
+\begin{rsession}
+x <- c(2, 3, 5, 7, 11)
+sum(x[x > 2])
+\end{rsession}
+\section*{What flowR sees}
+Every name links to the definition it reads, the line that writes a file is marked, and flowR
+draws the dataflow of the listing:
+\begin{mr}[mrname=clean]
+raw <- read.csv("cars.csv")
+fast <- subset(raw, speed > 20)
+write.csv(fast, "fast.csv")
+\end{mr}
+\begin{center}
+\mrDataflowGraph{clean}
+\end{center}
+\end{document}

@@ -1,0 +1,16 @@
+% Markers keep the links of what they mark, also over lines.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{markers}
+\begin{mr}
+x <- |warn|sum(1)|warn| + |err|mean(
+  2)|err| + |info|y|info|
+|plain|paste|plain|
+\end{mr}
+\EndBox
+\END

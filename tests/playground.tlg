@@ -1,0 +1,26 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ
+LINT NOTE: \mrLintRule {absolute-file-paths}{Absolute-File-Paths}
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+LINK: https://flowr-analysis.github.io/flowr/wiki/playground/#c=tc2V0d2QoIi90bXAiKQ&h=lint:absolute-file-paths&p=1:1
+LINT: mrerror
+---- no button
+TARGET: mr.3.x
+COPY: <-
+============================================================
+TEST 1: graphs
+============================================================
+A LEGEND ADDS HEIGHT: yes
+============================================================

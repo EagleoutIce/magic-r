@@ -1,0 +1,29 @@
+
+@@mr:1@@
+:prompt:x <- c(1, 5, 3)
+@@step@@
+:prompt:f <- function(v) {
+:cont:  v * 2
+:cont:}
+@@step@@
+:prompt:f(x)
+:out:[1]  2 10  6
+@@step@@
+:prompt:message("hi"); warning("w"); stop("no")
+:out:hi
+:out:Warning: w
+:out:Error: no
+@@step@@
+@@mr-stat:7:error@@
+
+@@mr:2@@
+:prompt:exists("x")
+:out:[1] FALSE
+@@step@@
+@@mr-stat:0:ok@@
+
+@@mr:3@@
+:prompt:(1 +
+:out:Error: incomplete input
+@@step@@
+@@mr-stat:0:error@@

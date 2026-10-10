@@ -1,0 +1,50 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: used before attached
+============================================================
+LINK: https://rdrr.io/cran/tidyr/man/pivot_longer.html
+PATH: {stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+============================================================
+============================================================
+TEST: attached where flowR says
+TARGET: mr.3.pkgs
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+INTERNAL: mr.3.pkgs
+LINK: https://rdrr.io/cran/tidyr/man/pivot_longer.html
+INTERNAL: mr.4.x
+============================================================
+TEST 2: attached
+============================================================
+PATH: {tidyr}{stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+============================================================
+============================================================
+TEST: code
+TARGET: mr.4.x
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+TARGET: mr.4.s
+COPY: <-
+COPY: <-
+TARGET: mr.4.a
+============================================================
+TEST: console listings are output
+============================================================
+TEST 3: the code
+============================================================
+CODE: ## magic-r block 1
+CODE: x <- y
+CODE: ## magic-r block 2
+CODE: pivot_longer
+CODE: ## magic-r block 3
+CODE: pkgs <- "tidyr"
+CODE: library(pkgs, character.only = TRUE)
+CODE: pivot_longer(x)
+CODE: 
+CODE: ## magic-r block 4
+CODE: x <- 1:10 %in% c(2, 0x1F, 1e-3) # a comment: "quoted" \ { } $ & ~ ^
+CODE: s <- 'it''s'; f <- \(a) a$b@c
+CODE: 
+============================================================

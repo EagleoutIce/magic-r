@@ -1,0 +1,30 @@
+% Names link as whole words, never within strings or comments; '.', '_',
+% digits, and ':' belong to names, 'pkg::name' links into the package.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{whole words}{\Typeset{\bmr{paste paste0 mypaste paste.x x.paste sum_ log10}}}
+\TEST{next to punctuation}{\Typeset{\bmr{c(sum,mean)[paste]}}}
+\TEST{digits}{\Typeset{\bmr{log10(x2) log 10}}}
+\TEST{strings}{\Typeset{\bmr{"paste" 'sum'}}}
+\TEST{comments}{\Typeset{\bmr{x \# paste sum stats::sd}}}
+\TEST{qualified}{\Typeset{\bmr{stats::sd(x) base::mean dplyr::filter}}}
+\TEST{internal}{\Typeset{\bmr{stats:::sd}}}
+\TEST{unknown in a package}{\Typeset{\bmr{stats::nope nope::sd}}}
+\TEST{sequences}{\Typeset{\bmr{x[1:10] sum:mean}}}
+\TEST{members}{\Typeset{\bmr{df\$mean x@sum mean}}}
+\TEST{operators}{\Typeset{\bmr{x \%in\% y; x\%in\%y; "\%in\%"}}}
+\TEST{pipes}{\Typeset{\bmr{x \%>\% sum |> mean}}}
+\TEST{other urls}{\mrAttach{other}\Typeset{\bmr{only}}\mrDetach{other}}
+\TEST{keywords}{\Typeset{\bmr{if (TRUE) function(x) NULL}}}
+\BeginBox{a block}
+\begin{mr}
+res <- median(c(1, 2))   # a comment: sum
+print(paste("sum", res))
+\end{mr}
+\EndBox
+\END

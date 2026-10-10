@@ -1,0 +1,32 @@
+% Sessions: R runs the lines like its console (fixture in tests/support).
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off,eval]{magic-r}
+\usepackage{mrtest}
+\mrRRun{never}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{session}
+\begin{rsession}
+x <- c(1, 5, 3)
+f <- function(v) {
+  v * 2
+}
+
+f(x)
+message("hi"); warning("w"); stop("no")
+\end{rsession}
+\EndBox
+\BeginBox{own environment}
+\begin{rsession}[listing={numbers=left}]
+exists("x")
+\end{rsession}
+\EndBox
+\BeginBox{incomplete}
+\begin{rsession}
+(1 +
+\end{rsession}
+\EndBox
+\EndDocumentHooks
+\END

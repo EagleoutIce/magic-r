@@ -1,0 +1,35 @@
+% With flowR: its answer (a fixture) decides definitions, uses, arguments, and
+% names of packages; lines that read or write are marked, a slice dims the
+% rest, and queries answer.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,dependencies]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{flow}
+\begin{mr}
+mean <- function(x) x
+p <- "tidyr"
+library(p, character.only = TRUE)
+d <- read.csv("in.csv")
+mean(d, na.rm = TRUE)
+1:p
+\end{mr}
+\EndBox
+\TEST{another block}{\Typeset{\bmr{mean + p}}}
+\TEST{not attached}{\ShowPath}
+\BeginBox{slice}
+\begin{mr}[mrslice={2@b}]
+a <- 1
+b <- 2
+\end{mr}
+\EndBox
+\makeatletter
+\TEST{query}{\mrFlowrQuery{q}{[{"type":"dependencies"}]}\TYPE{ANSWER: \mr@answer@q}}
+\TEST{pending query}{\TYPE{ANSWER: \ifcsname mr@answer@other\endcsname known\else pending\fi}}
+\makeatother
+\END

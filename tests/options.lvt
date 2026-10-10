@@ -1,0 +1,19 @@
+% Options and switches: links, underline, ligatures, the language name.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off,language=R,ligatures=false]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp\Typeset{\bR{x <- y |> sum}}
+\START
+\TEST{the language R}{\Typeset{\bR{paste(x)}}}
+\TEST{no ligatures}{\Typeset{\bR{x <- y |> sum}}}
+\TEST{ligatures}{\mrLigaturesOn\Typeset{\bR{x <- y |> sum}}}
+\TEST{no links}{\mrLinksOff\Typeset{\bR{paste}}\mrLinksOn}
+\TEST{no underline}{\mrUnderlineOff\Typeset{\bR{paste}}\mrUnderlineOn}
+\BeginBox{minted}
+\begin{minted}{R}
+sum(1)
+\end{minted}
+\EndBox
+\END

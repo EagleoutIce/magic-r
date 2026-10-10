@@ -1,0 +1,101 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: use before the definition links to its last overlay
+(beamer.vrb
+INTERNAL: mr.4.size
+) [1
+]
+============================================================
+TEST: listing and overlays
+(beamer.vrb
+TARGET: mr.3.size
+COPY: <-
+TARGET: mr.3.x
+INTERNAL: mr.3.x
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://cran.r-project.org/package=dplyr
+) [2
+] (beamer.vrb
+TARGET: mr.4.size
+COPY: <-
+TARGET: mr.4.x
+INTERNAL: mr.4.x
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://cran.r-project.org/package=dplyr
+INTERNAL: mr.4.size
+LINK: https://rdrr.io/cran/dplyr/man/filter.html
+LINK: https://rdrr.io/cran/dplyr/man/reexports.html
+LINK: https://rdrr.io/cran/dplyr/man/mutate.html
+) [3
+]
+============================================================
+TEST: markers and qualified names
+(beamer.vrb
+TARGET: mr.6.go
+COPY: <-
+MARK: mrwarning
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/sd.html
+MARK: mrwarning
+MARK: mrwarning
+MARK: mrwarning
+COPY: |>
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+) [4
+]
+============================================================
+TEST: animated session
+(beamer.vrb
+\g__mr_iow=\write...
+SESSION: :prompt:xs <- 1:3
+SESSION: 
+SESSION: 
+SESSION: 
+SESSION: 
+) [5
+] (beamer.vrb
+SESSION: :prompt:xs <- 1:3
+SESSION: :prompt:sum(xs)
+SESSION: :out:[1] 6
+SESSION: 
+SESSION: 
+) [6
+] (beamer.vrb
+SESSION: :prompt:xs <- 1:3
+SESSION: :prompt:sum(xs)
+SESSION: :out:[1] 6
+SESSION: :prompt:xs * 2
+SESSION: :out:[1] 2 4 6
+) [7
+]
+============================================================
+TEST: session from overlay 2
+(beamer.vrb
+) [8
+] (beamer.vrb
+SESSION: :prompt:prod(1:4)
+SESSION: :out:[1] 24
+) [9
+]
+============================================================
+TEST: pause within a listing, then a use in the next frame
+(beamer.vrb
+TARGET: mr.7.twice
+COPY: <-
+TARGET: mr.7.x
+INTERNAL: mr.7.x
+INTERNAL: mr.7.x
+) [10
+] (beamer.vrb
+TARGET: mr.8.twice
+COPY: <-
+TARGET: mr.8.x
+INTERNAL: mr.8.x
+INTERNAL: mr.8.x
+) [11
+]
+(beamer.vrb
+INTERNAL: mr.8.twice
+) [12
+]

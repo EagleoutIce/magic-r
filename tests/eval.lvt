@@ -1,0 +1,32 @@
+% Answers of R are mapped back to their queries (no R needed: the output of
+% a previous run is a fixture in tests/support).
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off,eval]{magic-r}
+\usepackage{mrtest}
+\mrRRun{never}
+\mrRSetup{options(digits = 4)}
+\ExplSyntaxOn
+\cs_new_protected:Npn \Show #1#2
+  {
+    \setbox0\hbox
+      { #1{#2} \TYPE { \l_mr_r_answer_str \c_space_tl [ \bool_if:NTF \g_mr_r_error_bool { error } { ok } ] } }
+  }
+\cs_new_protected:Npn \ShowArg #1 { \__mr_arg:n {#1} \TYPE { \l__mr_arg_str } }
+\ExplSyntaxOff
+\begin{document}
+\WarmUp
+\START
+\TEST{values}{\Show\mrValueOf{mean(1:10)}\Show\mrValueOf{  sqrt(2)  }\Show\mrValueOf{c(1, 2, 3)}}
+\TEST{printed}{\Show\mrEvalOf{summary(c(1, 2))}}
+\TEST{error}{\Show\mrValueOf{nope}}
+\TEST{warning}{\Show\mrEvalOf{as.integer("x")}}
+\TEST{into}{\mrValueInto\Answer{nchar("magic")}\TYPE{\Answer}}
+\TEST{state}{\Show\mrValueOf{y <- 2}\Show\mrValueOf{y * 21}}
+\TEST{regular arguments}{\ShowArg{"a\nb"}\ShowArg{\(x) x}\ShowArg{5 \%\% 3}\ShowArg{x\$y}}
+\setbox0\hbox{\mrValue{"50%"}}
+\TEST{verbatim}{\TYPE{\the\wd0 > 0pt, \mrRTime\space ms}}
+\TEST{context}{\mrSource{fib.R}\Show\mrValueOf{fib(10)}\mrSourceOff\Show\mrValueOf{exists("fib")}}
+\TEST{load error}{\mrSource{broken.R}\Show\mrValueOf{1}\mrSourceOff}
+\EndDocumentHooks
+\END

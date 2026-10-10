@@ -1,0 +1,13 @@
+% Inline code reads its argument verbatim, within another argument the
+% escaped characters still work.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\SEPARATOR\TYPE{TEST: verbatim}
+\setbox0\hbox{\bmr{x %in% y + df$a & b^2 ~ c_1 # mean} \bmr{\(z) "a\nb"}}
+\TEST{in an argument}{\Typeset{\bmr{x \%in\% y + df\$a \# mean}}}
+\END

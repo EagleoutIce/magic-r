@@ -1,0 +1,37 @@
+% mrtest.sty: test harness for magic-r. Load it after magic-r: every link,
+% target, ligature, and marker writes a line to the log.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{mrtest}[2026/10/10 magic-r test harness]
+\newbox\mrtest@box
+\AtBeginDocument{%
+  \def\mr@href#1#2{\typeout{LINK: \detokenize\expandafter{\expanded{#1}}}#2}%
+  \let\mrtest@copyas\mr@copyas
+  \def\mr@copyas#1#2{\typeout{COPY: \detokenize\expandafter{#1}}\mrtest@copyas{#1}{#2}}%
+  \def\hypertarget#1#2{\typeout{TARGET: #1}#2}%
+  \def\hyperlink#1#2{\typeout{INTERNAL: #1}#2}%
+  \let\mrtest@mark\mr@mark
+  \def\mr@mark#1{\typeout{MARK: \mr@markcolor}\mrtest@mark{#1}}%
+  \let\mrtest@lint\mrLintLine\def\mrLintLine#1{\typeout{LINT: #1}\mrtest@lint{#1}}%
+  \def\mrLintNote#1{\typeout{LINT NOTE: #1}}%
+  \def\mrDependencyBar{\typeout{DEPENDENCY: \mr@linemark}}\def\mrDependencyNote#1{\typeout{DEPENDENCY NOTE: #1}}%
+  \def\mrIndexMark#1{\typeout{INDEX: \mr@token\space#1}}}
+% #1 code, typeset into a box and dropped
+\newcommand\Typeset[1]{\setbox\mrtest@box\vbox{\hsize=\linewidth#1}}
+% listings environments cannot be arguments: \BeginBox{name} <env> \EndBox
+\def\BeginBox#1{\SEPARATOR\TYPE{TEST: #1}\setbox\mrtest@box\vbox\bgroup\hsize=\linewidth}
+\def\EndBox{\egroup}
+% the boxes are dropped, not shipped out, so the aux file is written at once;
+% beamer frames are shipped out as usual
+\@ifclassloaded{beamer}{}{\def\mr@write@{\immediate\write}}
+% before \START: loads fonts and the like, which would clutter the log
+\newcommand\WarmUp{\Typeset{\csname b\mrLanguage\endcsname{x <- y}$x^{y_z}$\textsf{\textit{x}}\texttt{\textbackslash}%
+  {\usefont{U}{lasy}{m}{n}\fontsize{6}{6}\selectfont\char58}{\large$\triangleright$}}}
+% \END stops TeX at once, but magic-r runs R and flowR at the end of the document
+\newcommand\EndDocumentHooks{\OMIT\UseHook{enddocument}\TIMO}
+\newcommand\ShowPath{\TYPE{PATH: \mr@path}}
+% sessions write their lines instead of typesetting them
+\AtBeginDocument{\def\mr@r@input#1#2#3{\begingroup\endlinechar=-1
+  \openin\mrtest@in=#3\relax\mrtest@lines\closein\mrtest@in\endgroup}}
+\newread\mrtest@in
+\def\mrtest@lines{\ifeof\mrtest@in\else\readline\mrtest@in to\mrtest@line
+  \ifeof\mrtest@in\else\typeout{SESSION: \mrtest@line}\fi\expandafter\mrtest@lines\fi}

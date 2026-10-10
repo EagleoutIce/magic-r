@@ -1,0 +1,46 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: flow
+TARGET: mr.f.2@1@1
+COPY: <-
+TARGET: mr.f.2@1@18
+INTERNAL: mr.f.2@1@18
+TARGET: mr.f.2@2@1
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+INTERNAL: mr.f.2@2@1
+DEPENDENCY: mrread
+DEPENDENCY NOTE: read
+TARGET: mr.f.2@4@1
+COPY: <-
+INTERNAL: mr.f.2@1@1
+INTERNAL: mr.f.2@4@1
+INTERNAL: mr.f.2@2@1
+============================================================
+TEST 1: another block
+============================================================
+INTERNAL: mr.f.2@1@1
+INTERNAL: mr.f.2@2@1
+============================================================
+============================================================
+TEST 2: not attached
+============================================================
+PATH: {stats}{graphics}{grDevices}{utils}{datasets}{methods}{base}
+============================================================
+============================================================
+TEST: slice
+\g__mr_slice_iow=\write...
+COPY: <-
+TARGET: mr.4.b
+COPY: <-
+============================================================
+TEST 3: query
+============================================================
+ANSWER: in.csv
+============================================================
+============================================================
+TEST 4: pending query
+============================================================
+ANSWER: pending
+============================================================
