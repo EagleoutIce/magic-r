@@ -8,17 +8,29 @@ on:
       - main
   workflow_dispatch:
 
+# a newer push to a pull request replaces its run, runs on main always finish (they publish)
 concurrency:
   group: "${{ github.workflow }}-${{ github.head_ref || github.ref }}-${{ github.event_name }}"
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # the version of flowR the shipped database was generated with
+  FLOWR_VERSION: 2.15.10
+  # the oldest xlistings magic-r supports (\mr@xlistings@min in magic-r.sty, v1.0.0 of 2026/08/17)
+  XLISTINGS_MIN: e45cc1091f795934671d8ead041e9c4da63baf6d
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
 
       - name: Install TeX Live
         uses: zauguin/install-texlive@v4
@@ -31,13 +43,11 @@ jobs:
       - name: '✅ Test the flowR bridge'
         run: node --test tests/node/*.test.mjs
 
-      # the oldest xlistings magic-r supports (\mr@xlistings@min in magic-r.sty, v1.0.0 of 2026/08/17)
       - name: '✅ Run the test suite with the oldest supported xlistings'
         run: |
-          git -C xlistings fetch --depth 1 origin e45cc1091f795934671d8ead041e9c4da63baf6d
-          git -C xlistings checkout --detach e45cc1091f795934671d8ead041e9c4da63baf6d
+          git -C xlistings fetch --depth 1 origin "$XLISTINGS_MIN"
+          git -C xlistings checkout --detach "$XLISTINGS_MIN"
           l3build check
-          git -C xlistings checkout --detach -
 
       - name: '🔍 Upload the test output for inspection'
         if: failure()
@@ -46,19 +56,25 @@ jobs:
           name: test-output
           path: |
             /tmp/magic-r/test/*.log
-            /tmp/magic-r/test-config-lua/*.log
             /tmp/magic-r/test/*.diff
+            /tmp/magic-r/test-config-lua/*.log
+            /tmp/magic-r/test-config-lua/*.diff
           if-no-files-found: ignore
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       contents: write   # the documentation goes to the gh-pages branch
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
 
       - name: Install TeX Live
         uses: zauguin/install-texlive@v4
@@ -67,30 +83,40 @@ jobs:
 
       - name: Install R and flowR
         run: |
-          sudo apt-get install -y r-base-core
-          npm install -g @eagleoutice/flowr
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends r-base-core
+          # --ignore-scripts: flowR runs tree-sitter as WebAssembly, the native build it would start is not needed
+          npm install -g --ignore-scripts "@eagleoutice/flowr@$FLOWR_VERSION"
+          Rscript --version
+          node "$(npm root -g)/@eagleoutice/flowr/cli/flowr.js" --version
 
       - name: '✅ Test the flowR bridge with a real flowR'
-        run: MAGIC_R_FLOWR=flowr node --test tests/node/*.test.mjs
+        run: MAGIC_R_FLOWR="node $(npm root -g)/@eagleoutice/flowr/cli/flowr.js" node --test tests/node/*.test.mjs
 
       - name: '⏱️ Run the benchmark'
         run: l3build bench
 
-      - name: Build examples and documentation
-        run: latexmk
-
-      - name: '📖 Typeset the documentation with l3build (shell escape, R and flowR)'
+      # magic-r finds the flowR of 'npm install -g' itself, R is Rscript on the path
+      - name: '📖 Build examples and documentation (shell escape, R and flowR)'
         run: |
-          l3build doc
-          ! grep -q 'Shell escape is not available' /tmp/magic-r/doc/magic-r-doc.log
+          latexmk
+          for f in example example-beamer magic-r-doc; do
+            grep -q 'mrFlowrStatus{ok}{node flowR' "build/$f.mr.cfg" || { echo "::error::flowR did not answer for $f"; head -n 3 "build/$f.mr.cfg"; exit 1; }
+          done
+          if grep -E 'Shell escape is not available|Package magic-r Warning' build/*.log; then
+            echo "::error::magic-r warned while building the documentation"; exit 1
+          fi
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: result
           path: |
             build/*.pdf
+            build/*.log
             bench/bench-results.tex
+          if-no-files-found: ignore
 
       - name: Publish the PDFs to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -103,7 +129,7 @@ jobs:
 
       - name: Push to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ad-m/github-push-action@master
+        uses: ad-m/github-push-action@v1.3.0
         with:
           branch: gh-pages
           github_token: ${{ secrets.GITHUB_TOKEN }}

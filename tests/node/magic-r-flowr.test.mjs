@@ -232,9 +232,9 @@ test('backends: an explicit one, and auto without anything', () => {
 	assert.deepEqual(docker.prefix('/tmp/a'), ['docker', 'run', '/tmp/a']);
 });
 
-// the pages of the link check, without the network: `pages` answer 200, all others 404
-function stubFetch(t, pages = null) {
-	t.mock.method(globalThis, 'fetch', async url => ({ status: !pages || pages.has(url) ? 200 : 404 }));
+// the pages of the link check, without the network: `pages` answer 200, `other` its status, all others 404
+function stubFetch(t, pages = null, other = new Map()) {
+	t.mock.method(globalThis, 'fetch', async url => ({ status: !pages || pages.has(url) ? 200 : other.get(url) ?? 404 }));
 }
 
 test('generate writes a database for a list of packages', async t => {
@@ -622,4 +622,26 @@ test('a graph of several listings frames each file, side by side', () => {
 	const x = id => +new RegExp(`\\\\mrGraphNode\\[[\\d.]+\\]\\{${id}\\}\\{([-\\d.]+)\\}`).exec(text)[1];
 	const xs = name => new RegExp(`\\\\mrGraphGroup\\{${name}\\}\\{([^}]*)\\}`).exec(text)[1].match(/v\d+/g).map(x);
 	assert.ok(Math.max(...xs('a')) < Math.min(...xs('b')));
+});
+
+test('flowR of npm install -g, which has no command flowr', () => {
+	const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'mr-npm-'));
+	const node = path.join(prefix, 'bin', 'node');
+	assert.equal(m.npmFlowr({}, node), undefined);
+	const root = path.join(prefix, process.platform === 'win32' ? 'node_modules' : 'lib/node_modules');
+	const cli = path.join(root, '@eagleoutice', 'flowr', 'cli', 'flowr.js');
+	fs.mkdirSync(path.dirname(cli), { recursive: true });
+	fs.writeFileSync(cli, '');
+	assert.deepEqual(m.npmFlowr({}, process.platform === 'win32' ? path.join(prefix, 'node.exe') : node), [process.platform === 'win32' ? path.join(prefix, 'node.exe') : node, cli]);
+	assert.deepEqual(m.npmFlowr({ NPM_CONFIG_PREFIX: prefix }, '/elsewhere/bin/node'), ['/elsewhere/bin/node', cli]);
+	fs.rmSync(prefix, { recursive: true });
+});
+
+test('a page that does not answer is kept, not dropped', async t => {
+	stubFetch(t, new Set(), new Map([['https://rdrr.io/cran/pkg/man/busy.html', 503]]));
+	const text = m.packageEntry('pkg', '1.0', [{ name: 'busy', topic: 'busy' }, { name: 'gone', topic: 'gone' }]) + '\n\\mrOperators{}\n';
+	const r = await m.checkLinks(text, () => {}, [0, 0]);
+	assert.deepEqual([r.checked, r.failed, r.unreachable], [2, 1, 1]);
+	assert.deepEqual([...m.databaseUrls(r.text).values()].flat(), ['pkg::busy']);
+	assert.equal(fetch.mock.calls.filter(c => c.arguments[0].endsWith('busy.html')).length, 3);
 });

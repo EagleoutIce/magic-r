@@ -487,8 +487,8 @@ warning says why and \cref{sec:plain} still applies. The key \key[flowr]{mrcaptu
 \subsection{Choosing a Backend}\label{sec:backends}
 magic-r uses the first of these backends that works, or the one the option \TT{flowr-backend} sets:
 \begin{description}
-\item \backend{node} the flowR command line: the option \TT{flowr-command}, \TT{\$MAGIC\_R\_FLOWR}, or \TT{flowr} on
-  the path (\TT{npm install -g @eagleoutice/flowr}). A local build of flowR works as well:
+\item \backend{node} the flowR command line: the option \TT{flowr-command}, \TT{\$MAGIC\_R\_FLOWR}, \TT{flowr} on
+  the path, or the flowR of \TT{npm install -g @eagleoutice/flowr}. A local build of flowR works as well:
   \code|flowr-command={node ~/flowr/dist/src/cli/flowr.js}|.
 \item \backend{docker} the image of the option \TT{flowr-image} (default \TT{eagleoutice/flowr:latest}), if
   docker has it.

@@ -11,10 +11,22 @@ on:
     - cron: "27 6 * * 1"
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # fails only for pages that are gone (404, 410), a page that does not answer is reported
+      # and kept; 'node magic-r-flowr.mjs verify --prune' fixes the database locally
       - name: Request every documentation page of the database
         run: node magic-r-flowr.mjs verify

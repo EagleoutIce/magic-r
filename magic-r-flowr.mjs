@@ -18,7 +18,8 @@
 //   itself, then search.r-project.org) and removes the ones without any.
 //
 // flowR runs through the first backend that works (--backend picks one):
-//   node    the flowR command line: --flowr <command>, $MAGIC_R_FLOWR, or 'flowr' on the PATH
+//   node    the flowR command line: --flowr <command>, $MAGIC_R_FLOWR, 'flowr' on the PATH, or
+//           the one of 'npm install -g @eagleoutice/flowr'
 //   docker  the image eagleoutice/flowr (--image), if docker has it
 //   r       the R package flowr, through Rscript
 //   web     the signature table of https://flowr-analysis.github.io/flowr/wiki/sigdb/, with
@@ -177,6 +178,25 @@ export function onPath(name) {
 					return file;
 				}
 			} catch{ /* not here */ }
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The command line of flowR installed with 'npm install -g @eagleoutice/flowr', which has no
+ * command 'flowr': its cli/flowr.js, run by this node. npm installs into <prefix>/lib/node_modules
+ * (<prefix>/node_modules on Windows), the prefix is $NPM_CONFIG_PREFIX or the one of this node.
+ */
+export function npmFlowr(env = process.env, execPath = process.execPath) {
+	const prefixes = [env.NPM_CONFIG_PREFIX ?? env.npm_config_prefix,
+		process.platform === 'win32' ? path.dirname(execPath) : path.dirname(path.dirname(execPath))].filter(Boolean);
+	for(const prefix of prefixes) {
+		for(const root of [path.join(prefix, 'lib', 'node_modules'), path.join(prefix, 'node_modules')]) {
+			const cli = path.join(root, '@eagleoutice', 'flowr', 'cli', 'flowr.js');
+			if(fs.existsSync(cli)) {
+				return [execPath, cli];
+			}
 		}
 	}
 	return undefined;
@@ -1746,8 +1766,9 @@ export function backends(opts) {
 	for(const kind of kinds) {
 		if(kind === 'node') {
 			const cmd = opts.flowr ?? process.env.MAGIC_R_FLOWR ?? onPath('flowr');
-			if(cmd) {
-				out.push(new Repl('node', splitCommand(cmd), { timeout, engine: opts.engine }));
+			const argv = cmd ? splitCommand(cmd) : npmFlowr();
+			if(argv) {
+				out.push(new Repl('node', argv, { timeout, engine: opts.engine }));
 			}
 		} else if(kind === 'docker') {
 			const image = opts.image ?? 'eagleoutice/flowr:latest', docker = onPath('docker');
@@ -1928,7 +1949,8 @@ export async function generateCommand(opts, [list]) {
 	// a package can document pages the sites do not have (yet)
 	const r = await checkLinks(text);
 	writeAtomic(out, r.text);
-	console.error(`wrote ${pkgs.length} packages to ${out}, ${r.failed} of ${r.checked} pages failed, ${r.moved} of their names have another page`);
+	console.error(`wrote ${pkgs.length} packages to ${out}, ${r.failed} of ${r.checked} pages are gone, ${r.moved} of their names have another page`
+		+ (r.unreachable ? `, ${r.unreachable} pages did not answer (kept)` : ''));
 }
 
 const untex = s => s.replace(/\\([%#$&])/g, '$1');
@@ -1983,31 +2005,44 @@ export function fallbackUrls(scheme, pkg, url, name) {
 	return [...new Set(pages)].filter(u => u !== url);
 }
 
-async function status(url) {
+// a page that is gone; any other failure (no answer, 429, 5xx) is the network or the site
+const GONE = new Set([404, 410]);
+/** the status of a page (0: no answer), asked again after each of `delays` (ms) while it fails otherwise */
+async function status(url, delays) {
 	let s = 0;
-	for(let attempt = 0; attempt < 3 && s !== 200 && s !== 404; attempt++) {
-		s = await fetch(url).then(r => r.status, () => 0);
+	for(let attempt = 0; ; attempt++) {
+		s = await fetch(url, { signal: AbortSignal.timeout(30000) }).then(r => r.status, () => 0);
+		if(s === 200 || GONE.has(s) || attempt >= delays.length) {
+			return s;
+		}
+		await new Promise(resolve => setTimeout(resolve, delays[attempt]));
 	}
-	return s;
 }
 
 /**
- * Requests every page of a database. A name whose page fails moves to the first fallback page
- * that works and is dropped if none does. Returns the fixed database and how many pages failed.
+ * Requests every page of a database. A name whose page is gone (404, 410) moves to the first
+ * fallback page that works and is dropped if none does. A page that does not answer is kept.
+ * Returns the fixed database, how many pages are gone, and how many did not answer.
  */
-export async function checkLinks(text, log = console.log) {
+export async function checkLinks(text, log = console.log, delays = [1000, 4000, 15000]) {
 	const urls = [...databaseUrls(text)], schemes = new Map();
 	for(const [, scheme, pkg] of text.matchAll(PACKAGE)) {
 		schemes.set(pkg, scheme);
 	}
 	const dead = new Set(), moved = new Map(), known = new Map();
-	const ok = async u => (known.has(u) ? known : known.set(u, status(u))).get(u).then(s => s === 200);
+	let unreachable = 0;
+	const ok = async u => (known.has(u) ? known : known.set(u, status(u, delays))).get(u).then(s => s === 200);
 	let next = 0;
 	const worker = async() => {
 		while(next < urls.length) {
 			const [url, names] = urls[next++];
-			const s = await status(url);
+			const s = await status(url, delays);
 			if(s === 200) {
+				continue;
+			}
+			if(!GONE.has(s)) {
+				unreachable++;
+				log(`UNREACHABLE ${s} ${url} (${names.join(', ')}), kept`);
 				continue;
 			}
 			dead.add(url);
@@ -2026,14 +2061,15 @@ export async function checkLinks(text, log = console.log) {
 		}
 	};
 	await Promise.all(Array.from({ length: 8 }, worker));
-	return { text: dead.size ? prune(text, dead, moved) : text, checked: urls.length, failed: dead.size, moved: moved.size };
+	return { text: dead.size ? prune(text, dead, moved) : text, checked: urls.length, failed: dead.size, moved: moved.size, unreachable };
 }
 
 export async function verifyCommand(opts, [file]) {
 	const root = path.dirname(fileURLToPath(import.meta.url));
 	file ??= path.join(root, 'magic-r-links.cfg');
 	const r = await checkLinks(fs.readFileSync(file, 'utf8'));
-	console.error(`verified ${r.checked} pages, ${r.failed} failed, ${r.moved} names have another page`);
+	console.error(`verified ${r.checked} pages, ${r.failed} are gone, ${r.moved} names have another page`
+		+ (r.unreachable ? `, ${r.unreachable} did not answer (kept, check again later)` : ''));
 	if(opts.prune && r.failed) {
 		writeAtomic(file, r.text);
 		console.error(`moved or removed their names in ${file}`);
