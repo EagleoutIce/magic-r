@@ -8,6 +8,7 @@ latex-tools-dev
 cm
 ec
 amsfonts
+amsmath
 graphics
 graphics-def
 graphics-cfg
@@ -57,6 +58,7 @@ translator
 parskip
 enumitem
 microtype
+needspace
 fancyvrb
 carlisle
 txfonts

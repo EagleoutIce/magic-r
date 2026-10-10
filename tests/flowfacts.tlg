@@ -3,16 +3,20 @@ Don't change this file in any respect.
 ============================================================
 TEST: flow
 TARGET: mr.f.2@1@1
+TARGET: mr.2.mean
 COPY: <-
 TARGET: mr.f.2@1@18
+TARGET: mr.2.x
 INTERNAL: mr.f.2@1@18
 TARGET: mr.f.2@2@1
+TARGET: mr.2.p
 COPY: <-
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
 INTERNAL: mr.f.2@2@1
 DEPENDENCY: mrread
 DEPENDENCY NOTE: read
 TARGET: mr.f.2@4@1
+TARGET: mr.2.d
 COPY: <-
 INTERNAL: mr.f.2@1@1
 INTERNAL: mr.f.2@4@1

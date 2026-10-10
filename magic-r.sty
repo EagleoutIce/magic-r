@@ -372,8 +372,11 @@
 \def\mr@fl#1#2{\let\mr@role\mr@role@flow\def\mr@flowtarget{#2}\def\mr@flowstyle{\csname mr@style@\csname mr@flk@#1\endcsname\endcsname}%
   \let\lst@thestyle\mr@keyword}
 \def\mr@flk@fun{user}\def\mr@flk@var{var}\def\mr@flk@param{param}
+% a definition of flowR is also the target of the rules without flowR, which inline code may use
 \def\mr@flowanchor{\ifcsname mr@placed@f@\mr@flowtarget\endcsname\else\csgdef{mr@placed@f@\mr@flowtarget}{}%
-  \ifdefined\hypertarget\mr@target{mr.f.\mr@flowtarget}\fi\fi}
+  \ifdefined\hypertarget\mr@target{mr.f.\mr@flowtarget}\fi\fi
+  \ifcsname mr@placed@\the\mr@lstid @\mr@token\endcsname\else\csgdef{mr@placed@\the\mr@lstid @\mr@token}{}%
+  \ifdefined\hypertarget\mr@target{mr.\the\mr@lstid.\mr@token}\fi\fi}
 \def\mr@flowplace#1{\mr@flowanchor{\colorlet{mr@plain}{.}\mr@flowstyle#1}}
 \def\mr@flowref#1{\mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.f.\mr@flowtarget}{\mr@underline{\mr@flowstyle#1}}}%
   {{\mr@flowstyle#1}}}
@@ -865,7 +868,7 @@
       { \str_if_eq_p:nn {#1} { auto } && \int_compare_p:n { \ShellEscapeStatus = 1 } }
       {
         \ShellEscape { \__mr_in_outdir:n {#2} }
-        \str_set:Nn \l__mr_first_str { no~output }
+        \str_set:Nn \l__mr_first_str { no~output,~is~the~command~installed? }
         \file_if_exist:nT {#4}
           {
             \ior_open:Nn \g__mr_ior {#4}
@@ -1702,7 +1705,6 @@
 \prop_new:N \g__mr_r_loaderr_prop  % key -> message of sourcing its file
 \prop_new:N \g__mr_r_keys_prop     % marker -> key
 \str_new:N \g__mr_r_md_str
-\bool_new:N \g__mr_r_rerun_bool
 \bool_new:N \g_mr_r_error_bool     % the last query failed
 \bool_new:N \l_mr_r_pending_bool   % the last query has no answer yet
 \tl_new:N \l_mr_r_lines_tl         % the answer of the last query
@@ -1823,11 +1825,13 @@
             \__mr_run:VenVn \g__mr_r_run_str
               { \g__mr_r_cmd_tl \c_space_tl \c__mr_r_script_str \c_space_tl > \c_space_tl \c__mr_r_out_str \c_space_tl 2>&1 }
               { R } \c__mr_r_out_str { \A@@mr: }
-            \bool_if:NT \l__mr_ok_bool { \str_gset_eq:NN \g__mr_r_md_str \l__mr_key_str }
-            \bool_gset_true:N \g__mr_r_rerun_bool
+            \bool_if:NT \l__mr_ok_bool
+              {
+                \str_gset_eq:NN \g__mr_r_md_str \l__mr_key_str
+                \msg_warning:nnn { magic-r } { rerun } { R }
+              }
           }
         \__mr_aux:e { \token_to_str:N \mr@r@md { \g__mr_r_md_str } }
-        \bool_if:NT \g__mr_r_rerun_bool { \msg_warning:nnn { magic-r } { rerun } { R } }
       }
   }
 
@@ -1845,7 +1849,6 @@
       {
         \tl_clear:N \l_mr_r_lines_tl
         \bool_set_true:N \l_mr_r_pending_bool
-        \bool_gset_true:N \g__mr_r_rerun_bool
       }
     \str_set:Ne \l_mr_r_answer_str
       { \tl_trim_spaces:e { \tl_map_function:NN \l_mr_r_lines_tl \__mr_spaced:n } }
