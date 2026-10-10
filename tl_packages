@@ -79,3 +79,11 @@ sansmathaccent
 tex-gyre
 translations
 ocgx2
+amscls
+epstopdf-pkg
+grfext
+l3backend
+latexconfig
+media9
+tools
+xpatch
