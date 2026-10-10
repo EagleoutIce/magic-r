@@ -1,0 +1,42 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: methods of generics
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+STYLE: function
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/format.html
+STYLE: function
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/as.data.frame.html
+STYLE: function
+============================================================
+============================================================
+TEST 2: a method with its own page
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.default.html
+STYLE: function
+============================================================
+============================================================
+TEST 3: data and functions
+============================================================
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+STYLE: function
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/letters.html
+STYLE: data
+============================================================
+============================================================
+TEST 4: no generic
+============================================================
+COPY: <-
+============================================================
+============================================================
+TEST: a method of the document
+TARGET: mr.8.print.foo
+COPY: <-
+TARGET: mr.8.x@1
+TARGET: mr.8.x
+TARGET: mr.8....@1
+TARGET: mr.8....
+INTERNAL: mr.8.print.foo
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+STYLE: function

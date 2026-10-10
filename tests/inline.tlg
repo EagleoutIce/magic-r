@@ -3,8 +3,10 @@ Don't change this file in any respect.
 ============================================================
 TEST: verbatim
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/Fdist.html
 ============================================================
 TEST 1: in an argument
 ============================================================
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/Fdist.html
 ============================================================

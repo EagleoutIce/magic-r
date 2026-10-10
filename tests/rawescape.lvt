@@ -1,10 +1,15 @@
 % Raw strings are strings (nothing in them links), escapes to LaTeX are code
-% for flowR as their text.
+% for flowR as their text: text commands give their text, other commands
+% nothing (not even their arguments, and nothing is expanded, so a command that
+% is not robust does no harm), and literates in math plain text (the arrow of
+% ':yields:' as U+2192, which pdfTeX writes as its bytes).
 \input{regression-test}
 \documentclass{article}
 \usepackage[database=testlinks]{magic-r}
 \usepackage{mrtest}
 \mrFlowrRun{never}
+\DeclareRobustCommand\mark[1]{}
+\newcommand\fragile[1]{\begingroup\def\x{#1}\endgroup}
 \ExplSyntaxOn
 \cs_new_protected:Npn \ShowCode
   {
@@ -20,6 +25,8 @@
 \begin{mr}
 x <- r"(sum "of" mean)" + R'-[it's sum]-' + sum(1)
 y <- !*\underline{mean}*!(x) + !*$\alpha$*!1 # !*\emph{note}*!
+avg <- function(!*\mark{pa}*!df, !*\fragile{pb}*!n = 2) !*\textcolor{red}{df}*! / n
+print(y) # :yields: 42
 \end{mr}
 \EndBox
 \EndDocumentHooks

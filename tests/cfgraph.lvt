@@ -1,0 +1,26 @@
+% The control flow graph of functions (the answer of flowR 2.15.10 as fixture):
+% every kind of node and edge it draws (statements, exits, code after a
+% return, calls, bodies, returns, forced arguments) has its TikZ style and a
+% name in the legend. A style that is missing is a pgfkeys error in this log.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,graphs]{magic-r}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\begin{mr}[mrname=early]
+g <- function(a) {
+  a
+  "g end"
+}
+h <- function() {
+  g(return("h early"))
+  "h end"
+}
+h()
+\end{mr}
+\START
+\TEST{with a legend}{\Typeset{\mrControlFlowGraph[legend]{early}}}
+\TEST{without}{\Typeset{\mrControlFlowGraph{early}}}
+\END

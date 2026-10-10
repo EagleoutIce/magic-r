@@ -93,6 +93,10 @@ jobs:
       - name: '✅ Test the flowR bridge with a real flowR'
         run: MAGIC_R_FLOWR="node $(npm root -g)/@eagleoutice/flowr/cli/flowr.js" node --test tests/node/*.test.mjs
 
+      # magic-r in lib/ of a project (relative TEXINPUTS) and the output in build/: no hang, flowR answers
+      - name: '✅ Build a document laid out as projects do'
+        run: sh tools/layout-test.sh
+
       - name: '⏱️ Run the benchmark'
         run: l3build bench
 

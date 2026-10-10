@@ -49,13 +49,31 @@ COPY: <-
 INTERNAL: mr.3.g
 INTERNAL: mr.3.x
 ============================================================
-TEST: only a parameter
-TARGET: mr.4.k
+TEST: a default sees the parameters
+TARGET: mr.4.avg
 COPY: <-
+TARGET: mr.4.df@1
+PARAM
 TARGET: mr.4.n@1
 TARGET: mr.4.n
 PARAM
+INTERNAL: mr.4.df@1
+PARAM
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
+INTERNAL: mr.4.df@1
+PARAM
 INTERNAL: mr.4.n@1
+PARAM
+TARGET: mr.4.df
+COPY: <-
+============================================================
+TEST: only a parameter
+TARGET: mr.5.k
+COPY: <-
+TARGET: mr.5.n@1
+TARGET: mr.5.n
+PARAM
+INTERNAL: mr.5.n@1
 PARAM
 ============================================================
 TEST 1: inline code

@@ -1,5 +1,6 @@
 % A parameter is the target of the uses in the body of its function, also
-% when the listing defines a variable of the same name outside of it.
+% when the listing defines a variable of the same name outside of it, and of the
+% defaults of the parameters after it ('n = nrow(df)'), and before a '$' ('df$a').
 \input{regression-test}
 \documentclass{article}
 \usepackage[database=testlinks,flowr=off]{magic-r}
@@ -24,6 +25,12 @@ g <- function(x, y) {
 }
 x <- 1
 y <- g(x, 2)
+\end{mr}
+\EndBox
+\BeginBox{a default sees the parameters}
+\begin{mr}
+avg <- function(df, n = nrow(df)) sum(df$a) / n
+df <- data.frame(a = 1)
 \end{mr}
 \EndBox
 \BeginBox{only a parameter}

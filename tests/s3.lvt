@@ -1,0 +1,32 @@
+% S3 methods ('print.character') that link nowhere else link to their generic,
+% which the database declares (\S). A method the document defines links to its
+% definition, a method with its own page to that page. A name that is no function
+% (\D, a data set) links as well, but is styled as data (as variables).
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\mrPackage[rman]{base}{4.6.1}{%
+\N{print,print.default,format,as.data.frame,letters,}%
+\S{print,format,as.data.frame,}%
+\D{letters,}%
+}
+\mrSetStyle{data}{\typeout{STYLE: data}}
+\mrSetStyle{function}{\typeout{STYLE: function}}
+\begin{document}
+\WarmUp
+\START
+\TEST{methods of generics}{\Typeset{\bmr{print.character(x)}}\Typeset{\bmr{format.Date(d)}}%
+  \Typeset{\bmr{as.data.frame.matrix(m)}}}
+\TEST{a method with its own page}{\Typeset{\bmr{print.default(x)}}}
+\TEST{data and functions}{\Typeset{\bmr{print(letters)}}}
+\TEST{no generic}{\Typeset{\bmr{my.data <- printer.x}}}
+\BeginBox{a method of the document}
+\begin{mr}
+print.foo <- function(x, ...) cat("foo")
+print.foo(obj)
+print.bar(obj)
+\end{mr}
+\EndBox
+\END

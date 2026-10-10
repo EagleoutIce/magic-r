@@ -1,0 +1,37 @@
+% mrslicemode=hide shows the lines of the slice; an empty slice (flowR found
+% none) shows all of them, never a broken line range. A hidden listing does not
+% show all of its code, so it keeps its part of the side file of the last run,
+% where flowR computes the slice.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks]{magic-r}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\ExplSyntaxOn
+\cs_new_protected:Npn \ShowSlices
+  {
+    \ior_open:Nn \g_tmpa_ior { \c_sys_jobname_str .mr-slice.R }
+    \ior_str_map_inline:Nn \g_tmpa_ior { \TYPE { SLICE:~##1 } }
+    \ior_close:N \g_tmpa_ior
+  }
+\ExplSyntaxOff
+\begin{document}
+\WarmUp
+\START
+\BeginBox{a slice}
+\begin{mr}[mrslice={3@total},mrslicemode=hide]
+total <- 0
+count <- 0
+print(total)
+\end{mr}
+\EndBox
+\BeginBox{an empty slice}
+\begin{mr}[mrslice={3@total},mrslicemode=hide]
+total <- 0
+count <- 0
+print(total)
+\end{mr}
+\EndBox
+\EndDocumentHooks
+\TEST{the side file}{\ShowSlices}
+\END

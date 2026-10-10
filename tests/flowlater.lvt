@@ -1,0 +1,37 @@
+% In a listing flowR read, a use without a definition before it links to none
+% of a later listing (R reads no such one), in other listings it still does.
+% The command of the helper only starts node with a script that exists, and
+% never lets it read from the terminal (an empty script made node wait forever).
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\mrFlowrRun{never}
+\begin{document}
+\WarmUp
+\START
+\BeginBox{flowR read this listing}
+\begin{mr}
+print(x)
+\end{mr}
+\EndBox
+\BeginBox{flowR did not read this one}
+\begin{mr}
+print(x)
+\end{mr}
+\EndBox
+\BeginBox{the later definition}
+\begin{mr}
+x <- 2
+\end{mr}
+\EndBox
+\ExplSyntaxOn
+\TEST{the~command}
+  {
+    \str_set:Ne \l_tmpa_str { \__mr_helper_cmd: }
+    \str_if_in:NnTF \l_tmpa_str { if~[~-f~"$S"~];~then~node~"$S" } { \TYPE { GUARD:~yes } } { \TYPE { GUARD:~no } }
+    \str_if_in:NnTF \l_tmpa_str { </dev/null } { \TYPE { STDIN:~yes } } { \TYPE { STDIN:~no } }
+  }
+\ExplSyntaxOff
+\END

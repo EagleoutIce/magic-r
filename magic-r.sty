@@ -30,11 +30,14 @@
 \DeclareBoolOption{lint}% flowR's linter for every listing
 \DeclareBoolOption{graphs-gray}% the graphs in shades of gray
 \DeclareBoolOption{graphs-legend}% a legend below dataflow graphs
+\DeclareBoolOption{graphs-lines}% the line of its code in every node of a graph
 \DeclareBoolOption{graphs}% load TikZ for \mrDataflowGraph and \mrControlFlowGraph
+\DeclareStringOption[auto]{arrowroute}% auto: arrows to a definition above over the top where they can, or side
 \DeclareBoolOption{playground}% a button beside every listing opens it in flowR's playground
 \DeclareStringOption{interactive}[on]% on: the key mrinteractive works, all: every listing is interactive
 \DeclareBoolOption{eval}
 \DeclareStringOption{xlistings}
+\DeclareBoolOption[true]{cleanup}% the script removes side files of older versions ('\jobname.mr-play-3.R')
 \ProcessKeyvalOptions*
 \let\mrLanguage\mr@language
 
@@ -89,12 +92,13 @@
 \def\mr@style@op{\@declaredcolor{mr@colors@prompt}}
 \def\mr@style@plain{\color{mr@plain}}% links keep the color around them
 \def\mr@style@arg{}% the names of named arguments ('n' in 'head(x, n = 3)')
+\def\mr@style@data{\mr@style@plain}% data sets of packages ('relig_income'), as variables
 % \mrSetStyle{kind}{style} sets the style of a kind of name, e.g. \mrSetStyle{user}{\color{gray}}
 \def\mr@stylename@function{func}\def\mr@stylename@variable{var}\def\mr@stylename@parameter{param}
 \def\mr@stylename@package{pkg}\def\mr@stylename@operator{op}\def\mr@stylename@argument{arg}
 \newcommand\mrSetStyle[2]{\edef\mr@t{\ifcsname mr@stylename@#1\endcsname\csname mr@stylename@#1\endcsname\else#1\fi}%
   \ifcsname mr@style@\mr@t\endcsname\expandafter\def\csname mr@style@\mr@t\endcsname{#2}\else
-  \PackageError{magic-r}{No style '#1'}{The kinds are function, user, variable, parameter, package, operator,
+  \PackageError{magic-r}{No style '#1'}{The kinds are function, user, variable, parameter, package, data, operator,
     and argument}\fi}
 \def\mrPrompt#1{\textcolor{mr@colors@prompt}{#1}}
 \if@xlst@accuspp@available@
@@ -120,17 +124,23 @@
 % \mrPackage[scheme]{package}{version}{entries} stores the entries of a
 % package; only the packages a document uses are read (\mr@load). An entry
 % \N{names} links names to the help topics of the same name, \T{topic}{names}
-% to a topic, \U{url}{names} to any page. A later \mrPackage replaces an
+% to a topic, \U{url}{names} to any page, \S{names} are the S3 generics, whose
+% methods ('print.foo') link to them, \D{names} are no functions (data sets), plain as the
+% variables of the document. A later \mrPackage replaces an
 % earlier one, so the database of the document (flowR) wins.
 \newcommand\mrPackage[4][cran]{\ifcsname mr@loaded@#2\endcsname\else
   \csgdef{mr@db@#2}{#4}\csgdef{mr@scheme@#2}{#1}\csgdef{mr@version@#2}{#3}\fi}
 \def\mr@load#1{\ifcsname mr@loaded@#1\endcsname\else\csgdef{mr@loaded@#1}{}%
   \ifcsname mr@db@#1\endcsname\begingroup\def\mr@pkg{#1}%
-    \let\N\mr@db@N\let\T\mr@db@T\let\U\mr@db@U\csname mr@db@#1\endcsname\endgroup
+    \let\N\mr@db@N\let\T\mr@db@T\let\U\mr@db@U\let\S\mr@db@S\let\D\mr@db@D\csname mr@db@#1\endcsname\endgroup
     \global\cslet{mr@db@#1}\@empty\fi\fi}
 \def\mr@db@N{\mr@db@names{}}
 \def\mr@db@T#1{\mr@str{#1}\expandafter\mr@db@names\expandafter{\expandafter\mr@t\expandafter{\mr@out}}}
 \def\mr@db@U#1{\mr@str{#1}\expandafter\mr@db@names\expandafter{\expandafter\mr@u\expandafter{\mr@out}}}
+\def\mr@db@D#1{\def\mr@list{#1}\@for\mr@n:=\mr@list\do{\ifx\mr@n\@empty\else
+  \expandafter\mr@str\expandafter{\mr@n}\csgdef{mr@data@\mr@pkg @\mr@out}{}\fi}}
+\def\mr@db@S#1{\def\mr@list{#1}\@for\mr@n:=\mr@list\do{\ifx\mr@n\@empty\else
+  \expandafter\mr@str\expandafter{\mr@n}\csgdef{mr@S@\mr@out}{}\fi}}
 % #1 target (empty: the name), #2 names; \mr@K@<name> lists the packages
 \def\mr@db@names#1#2{\def\mr@list{#2}\def\mr@target{#1}%
   \@for\mr@n:=\mr@list\do{\ifx\mr@n\@empty\else\expandafter\mr@str\expandafter{\mr@n}%
@@ -181,7 +191,8 @@
 \def\mr@resolve#1{\def\mr@found{{plain}{}}\ifcsname mr@K@#1\endcsname
   \def\mr@key{#1}\let\mr@hit\relax\expandafter\mr@search\expandafter{\expandafter.\expandafter}\mr@path\@nil
   \ifx\mr@hit\relax\ifmr@strict\else\expandafter\expandafter\expandafter\mr@first\csname mr@K@#1\endcsname\@nil\fi\fi
-  \ifx\mr@hit\relax\else\mr@found@in\mr@hit{#1}\fi\fi}
+  \ifx\mr@hit\relax\else\mr@found@in\mr@hit{#1}\fi
+  \else\ifcsname mr@s3@#1\endcsname\edef\mr@t{\csname mr@s3@#1\endcsname}\expandafter\mr@resolve\expandafter{\mr@t}\fi\fi}
 \def\mr@search#1{\ifx\@nil#1\else\ifx\mr@hit\relax
   \ifcsname mr@L@#1@\mr@key\endcsname\def\mr@hit{#1}\fi\fi\expandafter\mr@search\fi}
 % the first package, unless it only re-exports the name ('%>%' of dplyr)
@@ -191,7 +202,7 @@
 % #1 package, #2 name: \mr@found if the package exports it
 \def\mr@found@in#1#2{\ifcsname mr@L@#1@#2\endcsname
   \def\mr@t##1{\csname mr@url@\csname mr@scheme@#1\endcsname\endcsname{#1}{##1}}\let\mr@u\@firstofone
-  \edef\mr@found{{func}{\csname mr@L@#1@#2\endcsname}}\fi}
+  \edef\mr@found{{\ifcsname mr@data@#1@#2\endcsname data\else func\fi}{\csname mr@L@#1@#2\endcsname}}\fi}
 \def\mr@resolve@in#1#2{\def\mr@found{{plain}{}}\mr@load{#1}\mr@found@in{#1}{#2}}
 
 % Words are looked up when listings detects keywords, i.e. as whole words and
@@ -200,6 +211,7 @@
 \lst@AddToHook{DetectKeywords}{\ifmr@active\ifmr@quiet\else\mr@tokenname
   \ifcsname mr@K@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi
   \ifcsname mr@user@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi
+  \ifcsname mr@K@\mr@token\endcsname\else\mr@genericcheck\ifcsname mr@s3@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi\fi
   \expandafter\in@\expandafter:\expandafter{\mr@token}\ifin@\let\lst@thestyle\mr@keyword\fi\fi\fi}
 % #1 typeset word; \mr@token its name, \mr@role what the code around makes of it
 \def\mr@keyword#1{\ifx\mr@role\mr@role@sparam\mr@sparamdef{#1}\else\ifx\mr@role\mr@role@flow\mr@flowlink{#1}\else\ifx\mr@role\mr@role@ext\mr@libraryword{#1}\else
@@ -306,7 +318,7 @@
 \@for\mr@t:=\mrTightLigatures\do{\expandafter\mrTightLigature\expandafter{\mr@t}}
 \mrSymbol{<-}{\leftarrow}\mrSymbol{<<-}{\Leftarrow}\mrSymbol{->}{\rightarrow}\mrSymbol{->>}{\Rightarrow}
 \mrSymbol{|>}{\mr@pipe}\mrSymbol{<=}{\leq}\mrSymbol{>=}{\geq}\mrSymbol{!=}{\neq}
-\mrSymbol{\&\&}{\land}\mrSymbol{||}{\lor}
+% no symbol for '&&' and '||': one has to look like the characters it stands for, not as logic
 
 % \mr@role of the next word: plain after '$' and '@' (a column, a slot), and
 % for named arguments ('f(n = 1)'), which the last run found (aux file); pkg
@@ -404,8 +416,12 @@
 \def\mr@endexpr{\if e\mr@st\ifnum\mr@depth=\mr@sp\relax\ifnum\mr@bdepth=\mr@sb\relax\in@true\fi\fi\fi}
 \def\mr@endpar{\if e\mr@st\ifnum\mr@depth<\mr@sp\relax\in@true\fi\fi}
 \def\mr@endbrace{\if b\mr@st\ifnum\mr@bdepth=\mr@sb\relax\in@true\fi\else\ifnum\mr@bdepth<\mr@sb\relax\in@true\fi\fi}
-% #1 typeset word: a parameter of a function around it, else the rules of the listing
-\def\mr@scopedword#1{\let\mr@pfn\relax\expandafter\mr@findparam\mr@scopes\mr@sc{}{}{}{}\@nil
+% #1 typeset word: a parameter of a function around it, else the rules of the listing. R computes
+% a default ('n = nrow(df)') in the function, so there the parameters before it count first
+\def\mr@scopedword#1{\let\mr@pfn\relax
+  \ifmr@default\ifnum\mr@params>\z@\ifcsname mr@p@\the\mr@lstid @\mr@curfn @\mr@token\endcsname
+    \edef\mr@pfn{\mr@curfn}\fi\fi\fi
+  \ifx\mr@pfn\relax\expandafter\mr@findparam\mr@scopes\mr@sc{}{}{}{}\@nil\fi
   \ifx\mr@pfn\relax\expandafter\mr@linkword\expandafter{\mr@token}{#1}\else
   \mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.\the\mr@lstid.\mr@token @\mr@pfn}{\mr@underline{\mr@style@param#1}}}%
   {{\mr@style@param#1}}\fi}
@@ -583,7 +599,7 @@
   \def\mr@n{#3}\ifx\mr@n\mr@kind@param\else\csgdef{mr@knownv@\mr@t @#2}{}\fi}
 % so that the aux file still works without the package
 \AtBeginDocument{\if@filesw\immediate\write\@auxout{\string\providecommand\string\mr@definition[4]{}%
-  \string\providecommand\string\mr@argument[2]{}\string\providecommand\string\mr@notpkg[2]{}\string\providecommand\string\mr@uses[1]{}}\fi}
+  \string\providecommand\string\mr@argument[2]{}\string\providecommand\string\mr@notpkg[2]{}\string\providecommand\string\mr@uses[1]{}\string\providecommand\string\mr@agsave[3]{}}\fi}
 % a definition the last run did not know asks for a rerun, found when LaTeX
 % reads the aux file again at the end
 \AtEndDocument{\def\mr@definition#1#2#3#4{%
@@ -596,9 +612,14 @@
 % #1 typeset word, the name is \mr@token
 \def\mr@userlink#1{\let\mr@exact\relax\let\mr@below\relax\let\mr@firstdef\relax
   \expandafter\expandafter\expandafter\mr@scan\csname mr@user@\mr@token\endcsname\@nil\@nil\@nil
-  \ifx\mr@exact\relax\ifx\mr@below\relax\let\mr@exact\mr@firstdef\else\let\mr@exact\mr@below\fi\fi
+  \ifx\mr@exact\relax\ifx\mr@below\relax\mr@iflater\else\let\mr@exact\mr@below\fi\fi
   \ifx\mr@exact\relax\let\mr@t\mr@libraryword\else\edef\mr@t{\noexpand\mr@userlink@\mr@exact}\fi
   \mr@t{#1}}
+% the first definition, unless flowR saw the listing: it found no definition before the use, so
+% one of a later listing is not the one R reads
+\def\mr@iflater{\ifx\mr@firstdef\relax\else\ifcsname mr@flow@\the\mr@lstid\endcsname
+  \expandafter\mr@iflater@\mr@firstdef\else\let\mr@exact\mr@firstdef\fi\fi}
+\def\mr@iflater@#1#2{\ifnum#1>\mr@lstid\else\let\mr@exact\mr@firstdef\fi}
 % a name defined only locally elsewhere: as if the document did not define it
 \def\mr@libraryword#1{\expandafter\mr@resolve\expandafter{\mr@token}\expandafter\mr@show\mr@found{#1}}
 % #1 listing, #2 kind, #3 group; local definitions only count in their
@@ -696,6 +717,8 @@
     Inf,NaN,NA,NA_integer_,NA_real_,NA_character_,NA_complex_},
   sensitive=true,
   alsoletter={._:},
+  % listings counts '$' as a letter, but 'df$a' is the column a of df
+  alsoother={$},
   number suffixes={eEiL},
   moredelim=[s][\mr@backtick]{`}{`},
   morecomment=[l]\#,
@@ -734,6 +757,7 @@
   language=lMagicR,
   mrdefinitions=local,
   mrcapture=false,
+  mrplayground=false,% a session is no code to play with (listing={mrplayground} gives it a button)
   moredelim=[il][\mr@quietline]{:out:},
   add to literate={:prompt:}{{{\mr@nocopy{\mrPrompt{>}\ }}}}2 {:cont:}{{{\mr@nocopy{\mrPrompt{+}\ }}}}2
 }
@@ -750,6 +774,14 @@
 \def\mr@register{\edef\mr@t{\noexpand\RegisterLanguage[magic-r,R,r]{\mrLanguage}{lMagicR}}\mr@t}
 \mr@register
 \RegisterLanguage{rconsole}{lRConsole}
+% flowR's REPL: its prompt R>, commands through an escape (\mr@fscmd), output as for R
+\lstdefinelanguage{lFlowrConsole}{
+  language=lRConsole,
+  moredelim=[is][\mr@fsstyle]{|fc|}{|fc|},
+  add to literate={:flowr:}{{{\mr@nocopy{\mrPrompt{R>}\ }}}}3
+}
+% the command of an input (':dataflow*'): no names of R in it, in the style of \mrFlowrCommand
+\def\mr@fsstyle{\mr@quiettrue\xlstGetStyle{keywordA}}
 % the environments follow the style of xlistings ('style={plain number}'),
 % which xlistings itself only applies to its emulation of minted;
 % \mr@restyle{env}{language} does so for an environment of another language
@@ -816,6 +848,8 @@
   % flow charts
   mr entry/.style={mr block,rounded rectangle,draw=mrg-def!75,line width=.8pt},
   mr exit/.style={mr block,rounded rectangle,draw=mrg-call!70,line width=.8pt},
+  % code flowR never reaches (after a return), dimmed
+  mr dead/.style={mr block,draw=gray!30,densely dashed,text=gray!55},
   mr branch/.style={mr block,chamfered rectangle,chamfered rectangle xsep=2cm,chamfered rectangle angle=40,
     draw=gray!60},
   mr edge/.style={->,draw=gray!65,line width=.45pt,shorten >=.5pt},
@@ -823,6 +857,10 @@
   mr calls/.style={draw=mrg-call!70,line width=.6pt}, mr returns/.style={densely dashed},
   mr argument/.style={densely dotted,draw=gray!50},
   mr flow/.style={}, mr cond/.style={}, mr back/.style={densely dashed},
+  mr body/.style={densely dotted,draw=mrg-def!60}, mr unreach/.style={densely dotted,draw=gray!35},
+  % the call graph: all edges are calls, the color of the code; in the control flow graph, the place
+  % where a function forces an argument leads into it (R computes arguments when they are needed)
+  mr cgcall/.style={}, mr forces/.style={densely dashed,draw=mrg-call!55},
   mr edge label/.style={font=\ttfamily\tiny,fill=white,inner sep=.6pt,outer sep=.6pt},
   mr group/.style={draw=gray!35,fill=gray!3,rounded corners=4pt,inner sep=7pt},
   mr group label/.style={font=\ttfamily\tiny,text=gray!70!black,inner sep=2pt},
@@ -831,8 +869,8 @@
 \fi
 % #3 the legend (dataflow graphs): what the shapes and the edges of the graph mean
 \def\mr@drawgraph#1#2#3{\begin{tikzpicture}[mr graph,#1]\mr@glreset#2#3\end{tikzpicture}}
-\def\mr@glkinds{vdef,fdef,use,value,fcall,entry,block,branch,exit,cgmain,cgfun,cgbuiltin}
-\def\mr@gledges{reads,definedBy,calls,returns,argument,flow,cond,back}
+\def\mr@glkinds{vdef,fdef,use,value,fcall,entry,block,branch,exit,dead,cgmain,cgfun,cgbuiltin}
+\def\mr@gledges{reads,definedBy,calls,returns,argument,flow,cond,back,body,unreach,cgcall,forces}
 \def\mr@glreset{\edef\mr@t{\mr@glkinds,\mr@gledges}%
   \@for\mr@t:=\mr@t\do{\global\expandafter\let\csname mr@gl@\mr@t\endcsname\relax}}
 \def\mr@glname@vdef{definition}\def\mr@glname@fdef{function}\def\mr@glname@use{use}
@@ -840,8 +878,8 @@
 \def\mr@glname@definedBy{defined by}\def\mr@glname@calls{calls}\def\mr@glname@returns{returns}
 \def\mr@glname@argument{argument}\def\mr@glname@entry{entry}\def\mr@glname@block{block}
 \def\mr@glname@branch{condition}\def\mr@glname@exit{exit}\def\mr@glname@flow{flow}
-\def\mr@glname@cond{branch (T, F)}\def\mr@glname@back{loop}
-\def\mr@glname@cgmain{top level}\def\mr@glname@cgfun{function}\def\mr@glname@cgbuiltin{of R}
+\def\mr@glname@cond{branch (T, F)}\def\mr@glname@back{loop}\def\mr@glname@body{body}\def\mr@glname@cgcall{calls}\def\mr@glname@forces{forces}\def\mr@glname@dead{unreachable}\def\mr@glname@unreach{after a return}
+\def\mr@glname@cgmain{top level}\def\mr@glname@cgfun{function}\def\mr@glname@cgbuiltin{R fn}
 % whether a graph has a legend: the key legend of \mrDataflowGraph, else the option graphs-legend
 \newif\ifmr@legend
 % the legend: a box with the shapes and the edges of the graph in two columns, where the script found
@@ -861,8 +899,13 @@
         \clist_map_inline:Nn \mr@glkinds
           {
             \cs_if_eq:cNF { mr@gl@ ##1 } \relax
-              { \seq_put_right:Nn \l__mr_glshapes_seq { \tikz[baseline={([yshift=-.5ex]n.center)},sharp~corners]{\node[mr~node,mr~##1,
-                  minimum~height=1em,minimum~width=1.7em,inner~sep=0pt](n){};\mr@gbars{##1}{n}}~
+              { \seq_put_right:Nn \l__mr_glshapes_seq { \tikz[baseline={([yshift=-.5ex]n.center)},sharp~corners]{
+                  % a condition is a hexagon: the chamfers of its shape need content, which the sample has not
+                  \str_if_eq:nnTF {##1} { branch }
+                    { \coordinate(n)at(0,0);\draw[mr~node,draw=gray!60](-.85em,0)--(-.55em,.5em)--(.55em,.5em)--(.85em,0)
+                        --(.55em,-.5em)--(-.55em,-.5em)--cycle; }
+                    { \node[mr~node,mr~##1,minimum~height=1em,minimum~width=1.7em,inner~sep=0pt](n){}; }
+                  \mr@gbars{##1}{n}}~
                   \textcolor{gray!80!black}{\use:c { mr@glname@ ##1 }} } }
           }
         \clist_map_inline:Nn \mr@gledges
@@ -898,8 +941,9 @@
 \def\mr@gbars#1#2{\ifcsname mr@gbars@#1\endcsname\draw[mr fcall bars]([xshift=1.8pt]#2.north west)--([xshift=1.8pt]#2.south west)
   ([xshift=-1.8pt]#2.north east)--([xshift=-1.8pt]#2.south east);\fi}
 \def\mr@gbars@fcall{}
-% the id of a vertex in the dataflow graph, after its label
+% the id of a vertex in the dataflow graph, after its label, and the line of its code (key lines)
 \newcommand\mrGraphId[1]{\,\textcolor{gray!70}{\tiny#1}}
+\newcommand\mrGraphLine[1]{\,\textcolor{gray!55}{\tiny l.\,#1}}
 % what a vertex reads or calls of R itself, below its label
 \newcommand\mrGraphBuiltin[1]{\\[-1pt]\textcolor{gray!80}{\tiny#1}}
 % #1 kind, #2 the whole path, from an anchor of one node to one of the other
@@ -997,11 +1041,20 @@
 \cs_gset_protected:Npn \mr@begin { \tl_gclear:N \g__mr_line_tl \bool_gset_true:N \g__mr_block_bool }
 \cs_new:Npn \__mr_capturing:T #1
   { \bool_if:NT \g__mr_capture_bool { \legacy_if:nT { mr@active } { \legacy_if:nT { mr@capture } {#1} } } }
+% the lines are also kept for \mrYield (option eval), with flowR or without
+\cs_new:Npn \__mr_keeping:T #1
+  {
+    \legacy_if:nT { mr@active }
+      {
+        \legacy_if:nT { mr@capture }
+          { \bool_lazy_or:nnT { \legacy_if_p:n { mr@eval } } { \g__mr_capture_bool } {#1} }
+      }
+  }
 % the indentation of a line: the column of its first token (for flowR's playground)
 \int_new:N \g__mr_indent_int
 \cs_new_protected:Npn \__mr_grab:
   {
-    \__mr_capturing:T
+    \__mr_keeping:T
       {
         \tl_if_empty:NT \g__mr_line_tl { \int_gset:Nn \g__mr_indent_int { \lst@column - \lst@pos } }
         \tl_gput_right:No \g__mr_line_tl { \tex_the:D \lst@token }
@@ -1014,6 +1067,18 @@
 \tl_new:N \l__mr_line_tl
 \cs_new_protected:Npn \__mr_write_line:
   {
+    \__mr_keeping:T
+      {
+        \group_begin:
+        \__mr_line_text:
+        \legacy_if:nT { mr@eval }
+          {
+            \bool_if:NTF \g__mr_yielded_bool
+              { \str_gclear:N \g__mr_yield_str \bool_gset_false:N \g__mr_yielded_bool }
+              { \str_gput_right:Ne \g__mr_yield_str { \l__mr_plain_str \c__mr_nl_str } }
+          }
+        \group_end:
+      }
     \__mr_capturing:T
       {
             \bool_if:NT \g__mr_block_bool
@@ -1024,25 +1089,92 @@
                   { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~label~ \tl_to_str:N \l__mr_label_tl } }
               }
             \group_begin:
-            \cs_set_eq:NN \protect \@unexpandable@protect
-            \mr@plain
-            \tl_set:Ne \l__mr_line_tl { \g__mr_line_tl }
-            \regex_replace_all:nnN { \cB. | \cE. } { } \l__mr_line_tl
-            \iow_now:Ne \g__mr_code_iow { \tl_to_str:N \l__mr_line_tl }
+            \__mr_line_text:
+            \iow_now:Ne \g__mr_code_iow { \l__mr_plain_str }
             \seq_map_inline:Nn \g__mr_side_seq { \__mr_side_write:Nn ##1 }
             \group_end:
-            \tl_gclear:N \g__mr_line_tl
       }
+    \tl_gclear:N \g__mr_line_tl
   }
 \lst@AddToHook { EOL } { \__mr_write_line: }
+% each listing starts the code of \mrYield anew
+\lst@AddToHook { Init }
+  { \tl_gclear:N \g__mr_line_tl \str_gclear:N \g__mr_yield_str \bool_gset_false:N \g__mr_yielded_bool }
+% \l__mr_plain_str: the plain text of the line so far (in a group)
+\str_new:N \l__mr_plain_str
+\cs_new_protected:Npn \__mr_line_text:
+  {
+    \cs_set_eq:NN \protect \@unexpandable@protect
+    \mr@plain
+    \tl_set:Ne \l__mr_line_tl { \g__mr_line_tl }
+    \__mr_plain_text:N \l__mr_line_tl
+    \str_set:Ne \l__mr_plain_str { \tl_to_str:N \l__mr_line_tl }
+  }
+% \mrYield (option eval), in an escape of a listing: the value of the code up to there, as R
+% computes it in the environment of \mrValue. The query is the code of the listing since its start
+% or the last \mrYield, up to the escape ('print(x) # :yields: !*\mrYield*!' gives the value of
+% print(x)), so each line runs once, in order
+\str_new:N \g__mr_yield_str
+\bool_new:N \g__mr_yielded_bool
+\NewDocumentCommand \mrYield { }
+  {
+    \legacy_if:nTF { mr@eval }
+      {
+        \group_begin:
+        \__mr_line_text:
+        \str_set:Ne \l__mr_tmp_str { \g__mr_yield_str \l__mr_plain_str }
+        % R runs the code and gives only the value of its last expression
+        \exp_args:NV \__mr_r_query:nn \l__mr_tmp_str { yield }
+        \__mr_r_show:n { \exp_args:NV \mr@r@value \l_mr_r_answer_str }
+        \group_end:
+        \bool_gset_true:N \g__mr_yielded_bool
+      }
+      { \msg_warning:nn { magic-r } { yield } }
+  }
+\msg_new:nnn { magic-r } { yield } { \token_to_str:N \mrYield \c_space_tl needs~the~option~'eval'. }
+% the plain text of tokens for flowR, without expanding anything: what literates typeset in math
+% as text (the arrow of ':yields:' as the character U+2192), text commands as their text ('\textbf{x}' is 'x'), any
+% other command without its braced arguments ('\cm{pa}' is nothing), no braces of TeX. The '$' and
+% '\' of R are characters here, not math shifts or commands
+\cs_new_protected:Npn \__mr_plain_text:N #1
+  {
+    \regex_replace_all:nnN { \cM. \c{rightarrow} \cM. } { \u{c__mr_yields_tl} } #1
+    \regex_replace_all:nnN { \c{rightarrow|to|longrightarrow} } { -> } #1
+    \regex_replace_all:nnN { \c{leftarrow|gets|longleftarrow} } { <- } #1
+    \regex_replace_all:nnN { \c{ldots|dots|cdots} } { ... } #1
+    \regex_replace_all:nnN { \c{ } } { \  } #1
+    \regex_replace_all:nnN { \cM. } { } #1
+    \regex_replace_all:nnN { \c{textcolor} \cB. (?:\c[^BE].)* \cE. } { } #1
+    \bool_set_true:N \l__mr_more_bool
+    \bool_while_do:Nn \l__mr_more_bool
+      {
+        \tl_set_eq:NN \l__mr_was_tl #1
+        \regex_replace_all:nnN { \c{text[a-z]*|emph|underline|mbox|hbox|mrCode} (\cB. (?:\c[^BE].)* \cE.) } { \1 } #1
+        \regex_replace_all:nnN { \c{.*} (\ * \cB. (?:\c[^BE].)* \cE.)* } { } #1
+        \tl_if_eq:NNT \l__mr_was_tl #1 { \bool_set_false:N \l__mr_more_bool }
+      }
+    \regex_replace_all:nnN { \cB. | \cE. } { } #1
+  }
+\bool_new:N \l__mr_more_bool
+\tl_new:N \l__mr_was_tl
+% the arrow of ':yields:' (U+2192) in UTF-8: one character in LuaTeX and XeTeX, its bytes in pdfTeX
+\tl_const:Ne \c__mr_yields_tl
+  {
+    \bool_lazy_or:nnTF { \sys_if_engine_luatex_p: } { \sys_if_engine_xetex_p: }
+      { \char_generate:nn { "2192 } { 12 } }
+      { \char_generate:nn { "E2 } { 12 } \char_generate:nn { "86 } { 12 } \char_generate:nn { "92 } { 12 } }
+  }
+\tl_new:N \l__mr_esc_tl
 % an escape to LaTeX ('!*\textbf{x}*!') is code for flowR as its text ('x'): the escape is read up
-% to the active '*' that ends it, typeset, and its text added to the line and its columns
+% to the active '*' that ends it, typeset, and its text added to the line and its columns. Its
+% tokens are never expanded, so a command that is not robust does no harm
 \cs_new_protected:Npn \mr@escaped #1
   {
-    \__mr_capturing:T
+    \__mr_keeping:T
       {
-        \str_set:Ne \l__mr_tmp_str { \text_purify:n {#1} }
-        \regex_replace_all:nnN { \\[A-Za-z]+\ ? | \$ } { } \l__mr_tmp_str
+        \tl_set:Nn \l__mr_esc_tl {#1}
+        \__mr_plain_text:N \l__mr_esc_tl
+        \str_set:Ne \l__mr_tmp_str { \tl_to_str:N \l__mr_esc_tl }
         \tl_gput_right:NV \g__mr_line_tl \l__mr_tmp_str
         \int_gadd:Nn \mr@col { \str_count:N \l__mr_tmp_str }
       }
@@ -1087,6 +1219,7 @@
   { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--image~ \use:c { mr@flowr-image } } }
 \tl_if_empty:cF { mr@flowr-version }
   { \tl_gput_right:Ne \g__mr_helper_opts_tl { ~--require-version~" \use:c { mr@flowr-version } " } }
+\legacy_if:nF { mr@cleanup } { \tl_gput_right:Nn \g__mr_helper_opts_tl { ~--no-cleanup } }
 \msg_new:nnn { magic-r } { requests } { flowR~could~not~answer~the~queries~of~the~document:~#1 }
 \NewDocumentCommand \mrFlowrRequestsFailed { m } { \msg_warning:nnn { magic-r } { requests } {#1} }
 
@@ -1123,9 +1256,11 @@
 
 % \mrDataflowGraph[tikz options]{label} and \mrControlFlowGraph: the graphs of a listing,
 % laid out by the script, drawn with TikZ (package option graphs)
-% the keys of a graph: legend (default: the option graphs-legend), rowsep (the least distance of its
-% rows in cm, more where edges run sideways); all others are options of TikZ
+% the keys of a graph: legend (default: the option graphs-legend), lines (the line of its code in every
+% node, default: the option graphs-lines), rowsep (the least distance of its rows in cm, more where
+% edges run sideways); all others are options of TikZ
 \bool_new:N \l__mr_legend_bool
+\bool_new:N \l__mr_glines_bool
 \tl_new:N \l__mr_rowsep_tl
 \clist_new:N \l__mr_tikz_clist
 \bool_new:N \l__mr_mermaid_bool
@@ -1135,6 +1270,8 @@
   {
     legend .bool_set:N = \l__mr_legend_bool ,
     legend .default:n = true ,
+    lines .bool_set:N = \l__mr_glines_bool ,
+    lines .default:n = true ,
     rowsep .tl_set:N = \l__mr_rowsep_tl ,
     flowr .tl_set:N = \l__mr_instance_tl ,
     function .tl_set:N = \l__mr_gfun_tl ,
@@ -1149,6 +1286,7 @@
   {
     \group_begin:
     \legacy_if:nTF { mr@graphs-legend } { \bool_set_true:N \l__mr_legend_bool } { \bool_set_false:N \l__mr_legend_bool }
+    \legacy_if:nTF { mr@graphs-lines } { \bool_set_true:N \l__mr_glines_bool } { \bool_set_false:N \l__mr_glines_bool }
     \tl_set:Nn \l__mr_rowsep_tl { 0.2 }
     \keys_set_known:nnN { magic-r / graph } {#2} \l__mr_tikz_clist
     % the answer of another flowR has a name of its own
@@ -1161,6 +1299,7 @@
       {
         #1- \l_tmpb_str \tl_if_empty:NF \l__mr_gfun_tl { - \tl_to_str:N \l__mr_gfun_tl }
         \tl_if_empty:NF \l__mr_instance_tl { - \str_range:Nnn \l_tmpa_str { 1 } { 8 } }
+        \bool_if:NT \l__mr_glines_bool { -lines }
       }
     \bool_if:NTF \l__mr_mermaid_bool
       {
@@ -1182,6 +1321,7 @@
           {
             , ~ "rowsep": " \tl_to_str:N \l__mr_rowsep_tl "
             \tl_if_empty:NF \l__mr_gfun_tl { , ~ "function": " \tl_to_str:N \l__mr_gfun_tl " }
+            \bool_if:NT \l__mr_glines_bool { , ~ "lines": true }
           }
         \bool_if:NTF \l__mr_legend_bool { \mr@legendtrue } { \mr@legendfalse }
         \cs_if_exist:cTF { mr@graph@ \l__mr_gname_tl }
@@ -1235,14 +1375,21 @@
 % the key mrslice={criterion} dims every line flowR does not keep in the slice
 % for the criterion ('7@w': w in line 7; '7:3': line 7, column 3)
 \tl_new:N \l__mr_slice_tl
-% side files: all of the code of a listing in a file of its own (\jobname.mr-<kind>-<listing>.R),
-% for a slice as flowR gets it, for flowR's playground with its indentation
+% side files: the code of the listings that need it, for a slice as flowR gets it, for flowR's
+% playground with its indentation, one file of each kind for the document (\jobname.mr-<kind>.R),
+% where '## magic-r part <listing>' starts the code of a listing
 \iow_new:N \g__mr_slice_iow
 \iow_new:N \g__mr_play_iow
 \seq_new:N \g__mr_side_seq
+\seq_new:N \g__mr_side_open_seq
 \cs_new_protected:Npn \__mr_side_open:Nnn #1#2#3
   {
-    \iow_open:Nn #1 { \c_sys_jobname_str .mr- #2 - \int_use:N \mr@lstid .R }
+    \seq_if_in:NnF \g__mr_side_open_seq {#1}
+      {
+        \iow_open:Nn #1 { \c_sys_jobname_str .mr- #2 .R }
+        \seq_gput_right:Nn \g__mr_side_open_seq {#1}
+      }
+    \iow_now:Ne #1 { \c_hash_str \c_hash_str \c_space_tl magic-r~part~ \int_use:N \mr@lstid }
     \seq_gput_right:Nn \g__mr_side_seq { #1 {#3} }
   }
 \cs_new_protected:Npn \__mr_side_write:Nn #1#2
@@ -1254,12 +1401,59 @@
         \tl_to_str:N \l__mr_line_tl
       }
   }
-\lst@AddToHook { DeInit }
+\lst@AddToHook { DeInit } { \seq_gclear:N \g__mr_side_seq }
+% the parts of the side files of the last run (read before they are written anew): <kind>@<part> -> lines
+\prop_new:N \g__mr_side_old_prop
+\tl_new:N \l__mr_side_part_tl
+\cs_new_protected:Npn \__mr_side_read:n #1
   {
-    \seq_map_inline:Nn \g__mr_side_seq { \__mr_side_close:Nn ##1 }
-    \seq_gclear:N \g__mr_side_seq
+    \file_if_exist:nT { \c_sys_jobname_str .mr- #1 .R }
+      {
+        \tl_clear:N \l__mr_side_part_tl
+        \ior_open:Nn \g_tmpa_ior { \c_sys_jobname_str .mr- #1 .R }
+        \ior_str_map_inline:Nn \g_tmpa_ior
+          {
+            \regex_extract_once:nnNTF { \A\#\#\ magic-r\ part\ (\d+)\Z } {##1} \l_tmpa_seq
+              { \tl_set:Ne \l__mr_side_part_tl { #1 @ \seq_item:Nn \l_tmpa_seq { 2 } } }
+              {
+                \tl_if_empty:NF \l__mr_side_part_tl
+                  {
+                    \prop_get:NVNF \g__mr_side_old_prop \l__mr_side_part_tl \l_tmpa_tl { \tl_clear:N \l_tmpa_tl }
+                    \prop_gput:NVe \g__mr_side_old_prop \l__mr_side_part_tl { \l_tmpa_tl ##1 \c__mr_nl_str }
+                  }
+              }
+          }
+        \ior_close:N \g_tmpa_ior
+      }
   }
-\cs_new_protected:Npn \__mr_side_close:Nn #1#2 { \iow_close:N #1 }
+\AtBeginDocument { \__mr_side_read:n { slice } }
+% #1 stream, #2 kind, #3 listing: the part of the last run, again
+\cs_new_protected:Npn \__mr_side_keep:Nnn #1#2#3
+  {
+    \tl_set:Ne \l__mr_side_part_tl { #2 @ #3 }
+    \prop_get:NVNT \g__mr_side_old_prop \l__mr_side_part_tl \l_tmpa_tl
+      {
+        \seq_if_in:NnF \g__mr_side_open_seq {#1}
+          {
+            \iow_open:Nn #1 { \c_sys_jobname_str .mr- #2 .R }
+            \seq_gput_right:Nn \g__mr_side_open_seq {#1}
+          }
+        \iow_now:Ne #1 { \c_hash_str \c_hash_str \c_space_tl magic-r~part~ #3 }
+        \exp_args:NNVV \seq_set_split_keep_spaces:Nnn \l_tmpa_seq \c__mr_nl_str \l_tmpa_tl
+        % without the empty lines at its end, so the part stays as it is from run to run
+        \bool_set_true:N \l__mr_more_bool
+        \bool_while_do:Nn \l__mr_more_bool
+          {
+            \seq_get_right:NN \l_tmpa_seq \l_tmpb_tl
+            \bool_lazy_and:nnTF { ! \seq_if_empty_p:N \l_tmpa_seq } { \tl_if_blank_p:V \l_tmpb_tl }
+              { \seq_pop_right:NN \l_tmpa_seq \l_tmpb_tl }
+              { \bool_set_false:N \l__mr_more_bool }
+          }
+        \seq_map_inline:Nn \l_tmpa_seq { \iow_now:Ne #1 { \tl_to_str:n {##1} } }
+      }
+  }
+% closed before flowR reads them
+\cs_new_protected:Npn \__mr_side_close: { \seq_map_function:NN \g__mr_side_open_seq \iow_close:N \seq_gclear:N \g__mr_side_open_seq }
 \lst@Key { mrslice } { } { \tl_set:Nn \l__mr_slice_tl {#1} }
 \lst@AddToHook { Init }
   {
@@ -1278,13 +1472,13 @@
             \__mr_request:nnnn { slice } { slice- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
               {
                 , ~ "criterion":" \tl_to_str:V \l__mr_slice_tl ",
-                ~ "file":" \c_sys_jobname_str .mr-slice- \int_use:N \mr@lstid .R"
+                ~ "file":" \c_sys_jobname_str .mr-slice.R", ~ "part":" \int_use:N \mr@lstid "
               }
-            % the slice is computed on all of the code, which a hidden listing does not show
-            \bool_if:NF \g__mr_slicehidden_bool
-              {
-                \__mr_side_open:Nnn \g__mr_slice_iow { slice } { \c_false_bool }
-              }
+            % the slice is computed on all of the code, which a hidden listing does not show: it keeps
+            % its part of the last run
+            \bool_if:NTF \g__mr_slicehidden_bool
+              { \__mr_side_keep:Nnn \g__mr_slice_iow { slice } { \int_use:N \mr@lstid } }
+              { \__mr_side_open:Nnn \g__mr_slice_iow { slice } { \c_false_bool } }
           }
       }
   }
@@ -1313,8 +1507,16 @@
 % shows or hides
 % (optional content of the PDF, with ocgx2); those of the criteria are shown at first
 \tl_new:N \l__mr_arrows_tl
+\tl_new:N \l__mr_calls_tl
 \tl_new:N \l__mr_inter_tl
 \lst@Key { mrarrows } { } { \tl_set:Nn \l__mr_arrows_tl {#1} }
+% mrcallsarrows={criteria}: an arrow from each call a criterion points at (or from every call of the
+% function whose name it points at, 'all': every call) to the definition of the function it calls;
+% mrarrowroute=auto (the default) lets arrows to a definition above run over the top where nothing
+% is in their way, mrarrowroute=side keeps all of them beside the code
+\lst@Key { mrcallsarrows } { } { \tl_set:Nn \l__mr_calls_tl {#1} }
+\tl_new:N \l__mr_route_tl
+\lst@Key { mrarrowroute } { } { \tl_set:Nn \l__mr_route_tl {#1} }
 \lst@Key { mrinteractive } { } [ true ] { \tl_set:Nn \l__mr_inter_tl {#1} }
 \cs_new:Npn \__mr_json_item:n #1 { , " \tl_trim_spaces:n {#1} " }
 \cs_new:Npn \__mr_json_list:N #1
@@ -1341,12 +1543,17 @@
             \cs_if_exist:NF \toggleocgs
               { \msg_error:nn { magic-r } { interactive } \legacy_if_gset_false:n { mr@ainter } }
           }
-        \bool_lazy_or:nnT { ! \tl_if_empty_p:N \l__mr_arrows_tl } { \legacy_if_p:n { mr@ainter } }
+        \bool_lazy_any:nT
+          { { ! \tl_if_empty_p:N \l__mr_arrows_tl } { ! \tl_if_empty_p:N \l__mr_calls_tl } { \legacy_if_p:n { mr@ainter } } }
           {
             \clist_set:NV \l_tmpa_clist \l__mr_arrows_tl
+            \clist_set:NV \l_tmpb_clist \l__mr_calls_tl
+            \tl_if_empty:NT \l__mr_route_tl { \tl_set_eq:NN \l__mr_route_tl \mr@arrowroute }
             \__mr_request:nnnn { arrows } { arrows- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
               {
                 , ~ "criteria": \__mr_json_list:N \l_tmpa_clist
+                , ~ "calls": \__mr_json_list:N \l_tmpb_clist
+                , ~ "route": " \tl_to_str:N \l__mr_route_tl "
                 \legacy_if:nT { mr@ainter } { , ~ "all": true }
               }
           }
@@ -1370,7 +1577,7 @@
             \__mr_side_open:Nnn \g__mr_play_iow { play } { \c_true_bool }
             \__mr_request:nnnn { playground } { pg- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
               {
-                , ~ "file":" \c_sys_jobname_str .mr-play- \int_use:N \mr@lstid .R",
+                , ~ "file":" \c_sys_jobname_str .mr-play.R", ~ "part":" \int_use:N \mr@lstid ",
                 ~ "marks": \__mr_json_list:N \l__mr_marks_clist
               }
           }
@@ -1380,7 +1587,8 @@
   {
     \clist_map_inline:nn {#2} { \cs_gset:cpn { mr@sliced@ #1 @ ##1 } { } }
     \cs_gset:cpn { mr@slice@ #1 } { }
-    \cs_gset:cpe { mr@slicerange@ #1 } { \clist_map_function:nN {#2} \__mr_range:n }
+    % not \long, so that an empty range is empty (\tl_if_empty:c)
+    \cs_gset_nopar:cpe { mr@slicerange@ #1 } { \clist_map_function:nN {#2} \__mr_range:n }
   }
 \cs_new:Npn \__mr_range:n #1 { #1 - #1 , }
 % the key mrslicemode=dim|hide (default: the option slices); hide shows only the lines of the
@@ -1533,10 +1741,14 @@
 % variable (or criterion) of an arrow, whose color is one of mrarrow1 to mrarrow5. In an interactive
 % listing every name is an optional content group: a use shows its arrows, a definition the arrows
 % into it, each with the bands of its ends
-\newcommand*\mrFlowArrow[9]{%
-  \csgappto{mr@arrows@#1}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}}%
-  \mr@aname{#1}{#2-#3}{#6}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}\mr@aband{mr-a-#1-#4-#5}{#6}{20}}%
-  \mr@aname{#1}{#4-#5}{#6}{\mr@arrow{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}\mr@aband{mr-a-#1-#2-#3}{#6}{20}}}
+\newcommand*\mrFlowArrow{\def\mr@akind{mr arrow}\mr@flowarrow}
+% the same from a call to the definition of the function it calls (key mrcallsarrows)
+\newcommand*\mrFlowCallArrow{\def\mr@akind{mr call arrow}\mr@flowarrow}
+\def\mr@flowarrow#1#2#3#4#5#6#7#8#9{\edef\mr@t{\noexpand\mr@arrow{\mr@akind}{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}}%
+  \csxappto{mr@arrows@#1}{\expandonce\mr@t}%
+  \begingroup\edef\mr@u{\endgroup
+    \noexpand\mr@aname{#1}{#2-#3}{#6}{\expandonce\mr@t\noexpand\mr@aband{mr-a-#1-#4-#5}{#6}{20}}%
+    \noexpand\mr@aname{#1}{#4-#5}{#6}{\expandonce\mr@t\noexpand\mr@aband{mr-a-#1-#2-#3}{#6}{20}}}\mr@u}
 % the name a criterion points at (#2 line, #3 column, #4 its variable): a darker band, and in an
 % interactive listing its arrows are shown at first
 \newcommand*\mrFlowArrowCriterion[4]{\csgdef{mr@asrc@#1@#2-#3}{}\mr@aname{#1}{#2-#3}{#4}{}}
@@ -1549,6 +1761,28 @@
   \csgappto{mr@agroups@#1}{{#2}}\mr@ixnext{mr@apts@#1}\global\expandafter\let\csname mr@apts@#1\endcsname\mr@ix\fi
   \csgappto{mr@agroup@#1@#2}{#4}}
 \ExplSyntaxOn
+% an S3 method ('print.data.frame', 'as.data.frame.foo') that links nowhere else links to its generic:
+% the longest start before a '.' that a loaded package declares one (\mr@s3@<name>), once per name
+\seq_new:N \l__mr_generic_seq
+\tl_new:N \l__mr_generic_tl
+\cs_new_protected:Npn \mr@genericcheck
+  {
+    \cs_if_exist:cF { mr@s3seen@ \mr@token }
+      {
+        \cs_gset_eq:cN { mr@s3seen@ \mr@token } \prg_do_nothing:
+        \seq_set_split:NnV \l__mr_generic_seq { . } \mr@token
+        \seq_pop_right:NN \l__mr_generic_seq \l__mr_generic_tl
+        \bool_lazy_and:nnT { ! \tl_if_empty_p:N \l__mr_generic_tl } { \int_compare_p:nNn { \seq_count:N \l__mr_generic_seq } > 0 }
+          {
+            \tl_clear:N \l__mr_generic_tl
+            \seq_map_indexed_inline:Nn \l__mr_generic_seq
+              {
+                \tl_put_right:Ne \l__mr_generic_tl { \int_compare:nNnF {##1} = 1 { . } ##2 }
+                \cs_if_exist:cT { mr@S@ \l__mr_generic_tl } { \cs_gset:cpe { mr@s3@ \mr@token } { \l__mr_generic_tl } }
+              }
+          }
+      }
+  }
 \cs_new:Npn \mr@acolorof #1 { mrarrow \int_eval:n { \int_mod:nn { #1 - 1 } { 5 } + 1 } }
 \ExplSyntaxOff
 \newbox\mr@abox
@@ -1564,7 +1798,8 @@
   \ifcsname mr@asrc@\the\mr@lstid @\mr@akey\endcsname\def\mr@t{38}\else\def\mr@t{20}\fi
   \ifmr@ainter
     \ifcsname mr@agname@\the\mr@lstid @\mr@akey\endcsname\else
-      \csxdef{mr@agname@\the\mr@lstid @\mr@akey}{\mr@token\space(\the\numexpr\mr@line+1)}\fi
+      \csxdef{mr@agname@\the\mr@lstid @\mr@akey}{\mr@token\space(\the\numexpr\mr@line+1)}%
+      \mr@write{\string\mr@agsave{\the\mr@lstid}{\mr@akey}{\csname mr@agname@\the\mr@lstid @\mr@akey\endcsname}}\fi
     \toggleocgs{\mr@anode}{\tikz[remember picture,baseline=(\mr@anode.base)]\node[mr arrow token](\mr@anode){\box\mr@abox};}%
   \else
     \tikz[remember picture,baseline=(\mr@anode.base)]\node[mr arrow token,fill=\mr@acolor!\mr@t](\mr@anode){\box\mr@abox};%
@@ -1573,7 +1808,8 @@
   \ifnum\csname mr@aseen@\the\mr@lstid\endcsname=\csname mr@apts@\the\mr@lstid\endcsname\relax\mr@adraw\fi}
 % all arrows of a listing in one picture, or the group of each name in an optional content group of
 % its own, shown at first for the names of the criteria
-\def\mr@adraw{\ifmr@ainter
+% the width of a character of the code (TikZ has no font in its pictures), for the lanes of calls
+\def\mr@adraw{\setbox\mr@abox\hbox{0}\global\mr@acharwd\wd\mr@abox\ifmr@ainter
     \expandafter\expandafter\expandafter\mr@adrawgroups\csname mr@agroups@\the\mr@lstid\endcsname\relax
   \else\tikz[remember picture,overlay]{\csname mr@arrows@\the\mr@lstid\endcsname}\fi}
 \def\mr@adrawgroups#1{\ifx\relax#1\else
@@ -1590,23 +1826,49 @@
 \lst@AddToHook{EveryPar}{\ifmr@active\ifcsname mr@arrows@\the\mr@lstid\endcsname\vadjust{\nobreak}\fi\fi}
 % where the code of the first line starts: the lane of the arrows is left of it
 \lst@AddToHook{EveryPar}{\ifmr@active\ifnum\mr@line=\z@\ifcsname mr@arrows@\the\mr@lstid\endcsname\ifdefined\tikz
-  \tikz[remember picture,overlay]\coordinate(mr-a-\the\mr@lstid-o);\fi\fi\fi\fi}
-% an arrow from a use (#1 line, #2 column) to its definition (#3, #4) of group #5: below the line of
-% the use (track #6), left in its lane (#8) beside the code, and below the line of the definition
-% (track #7) into it. Only below the lines, where no letters are. The helper gives segments that would
-% overlap tracks and lanes of their own, \mrArrowTrack and \mrArrowLane apart
-\def\mrArrowLane{1.8pt}\def\mrArrowGap{3.2pt}\def\mrArrowTrack{1pt}
-\def\mr@arrow#1#2#3#4#5#6#7#8{\edef\mr@t{mr-a-\the\mr@lstid}%
-  \draw[mr arrow,draw=\mr@acolorof{#5}]let\p1=(\mr@t-#1-#2.base),\p2=(\mr@t-#3-#4.base),\p3=(\mr@t-o),
-    \p4=(\mr@t-#1-#2.south),\p5=(\mr@t-#3-#4.south),
-    \n1={\mrArrowGap+\mrArrowTrack*#6},\n2={\mrArrowGap+\mrArrowTrack*#7},\n3={\mrArrowLane*(#8+1)} in
-    \ifnum#1=#3 (\x4,\y4)--(\x1,\y1-\n1)--(\x2,\y2-\n1)--(\x5,\y5);\else
-    (\x4,\y4)--(\x1,\y1-\n1)--(\x3-\n3,\y1-\n1)--(\x3-\n3,\y2-\n2)--(\x2,\y2-\n2)--(\x5,\y5);\fi}
+  \tikz[remember picture,overlay]\coordinate(mr-a-\the\mr@lstid-o);\mr@apredefine\fi\fi\fi\fi}
+% an interactive listing defines the optional content groups of its names before the first one
+% toggles them (their arrows only come with the last name); a group is named after its name in the
+% last run (aux file), else after its place
+\def\mr@agsave#1#2#3{\csgdef{mr@agsaved@#1@#2}{#3}}
+\def\mr@apredefine{\ifmr@ainter\ifcsname mr@agroups@\the\mr@lstid\endcsname
+  \expandafter\expandafter\expandafter\mr@apredef\csname mr@agroups@\the\mr@lstid\endcsname\relax\fi\fi}
+\def\mr@apredef#1{\ifx\relax#1\else
+  \begin{ocg}{\ifcsname mr@agsaved@\the\mr@lstid @#1\endcsname\csname mr@agsaved@\the\mr@lstid @#1\endcsname\else#1\fi}%
+    {mr-a-\the\mr@lstid-#1}{\ifcsname mr@asrc@\the\mr@lstid @#1\endcsname 1\else 0\fi}\end{ocg}%
+  \expandafter\mr@apredef\fi}
+% an arrow (#1 its style) from a use (#2 line, #3 column) to its definition (#4, #5) of group #6:
+% below the line of the use (track #7), left in its lane (#9) beside the code, and below the line of
+% the definition (track #8) into it. Only below the lines, where no letters are. The helper gives
+% segments that would overlap tracks and lanes of their own, \mrArrowTrack and \mrArrowLane apart.
+% Lanes -2 and -1 are the ways over the top to a definition above, where the helper found no letters:
+% -2 straight up out of the use to below the line of the definition (track #7) and into it, -1 out
+% of the top of the use, below the line above it (track #7), and straight up into the definition
+\def\mrArrowLane{1.8pt}\def\mrArrowGap{3.2pt}\def\mrArrowTrack{1.5pt}
+% #9 is 'lane/i/n/i/n/column': the lane (-2, -1 over the top, 1000 and up right of the code for
+% calls), the place of the end among the n arrows into its name and of the start among those out of
+% its, spread over the width of the name, and the column right of which the lanes of calls are
+\newdimen\mr@acharwd
+\def\mr@lanesplit#1/#2/#3/#4/#5/#6/#7\@nil{\def\mr@alane{#1}\def\mr@aei{#2}\def\mr@aen{#3}\def\mr@asi{#4}%
+  \def\mr@asn{#5}\def\mr@arc{#6}}
+\def\mr@arrow#1#2#3#4#5#6#7#8#9{\edef\mr@t{mr-a-\the\mr@lstid}\mr@lanesplit#9/1/1/1/1/0/\@nil
+  \draw[#1,draw=\mr@acolorof{#6}]let\p1=(\mr@t-#2-#3.base),\p2=(\mr@t-#4-#5.base),\p3=(\mr@t-o),
+    \p4=(\mr@t-#2-#3.south west),\p5=(\mr@t-#4-#5.south west),\p6=(\mr@t-#2-#3.north west),
+    \p7=(\mr@t-#2-#3.south east),\p8=(\mr@t-#4-#5.south east),
+    \n1={\mrArrowGap+\mrArrowTrack*#7},\n2={\mrArrowGap+\mrArrowTrack*#8},\n3={\mrArrowLane*(\mr@alane+1)},
+    \n4={\baselineskip},\n5={\x4+(\x7-\x4)*\mr@asi/(\mr@asn+1)},\n6={\x5+(\x8-\x5)*\mr@aei/(\mr@aen+1)},
+    \n7={\x3+\mr@arc*\mr@acharwd+\mrArrowLane*(\mr@alane-999)} in
+    \ifnum\mr@alane<-1 (\n5,\y6)--(\n5,\y2-\n1)--(\n6,\y2-\n1)--(\n6,\y5);\else
+    \ifnum\mr@alane<\z@ (\n5,\y6)--(\n5,\y1+\n4-\n1)--(\n6,\y1+\n4-\n1)--(\n6,\y5);\else
+    \ifnum#2=#4 (\n5,\y4)--(\n5,\y1-\n1)--(\n6,\y2-\n1)--(\n6,\y5);\else
+    \ifnum\mr@alane>999 (\n5,\y4)--(\n5,\y1-\n1)--(\n7,\y1-\n1)--(\n7,\y2-\n2)--(\n6,\y2-\n2)--(\n6,\y5);\else
+    (\n5,\y4)--(\n5,\y1-\n1)--(\x3-\n3,\y1-\n1)--(\x3-\n3,\y2-\n2)--(\n6,\y2-\n2)--(\n6,\y5);\fi\fi\fi\fi}
 % the colors of the groups, in their order; more groups use these again
 \definecolor{mrarrow1}{HTML}{1E66F5}\definecolor{mrarrow2}{HTML}{DF8E1D}\definecolor{mrarrow3}{HTML}{40A02B}
 \definecolor{mrarrow4}{HTML}{8839EF}\definecolor{mrarrow5}{HTML}{D20F39}
 \ifmr@graphs\tikzset{mr arrow token/.style={inner sep=0pt,outer sep=0pt,rounded corners=1pt},
-  mr arrow/.style={->,>={Kite[length=2.6pt,width=2.2pt]},line width=.5pt,rounded corners=.8pt,opacity=.9}}\fi
+  mr arrow/.style={->,>={Kite[length=2.6pt,width=2.2pt]},line width=.5pt,rounded corners=.8pt,opacity=.9},
+  mr call arrow/.style={mr arrow}}\fi
 
 % Indices (key mrindex, option index): every symbol of a listing gets a subscript, in the style of
 % the IndexR of xlistings. usage numbers the uses of a symbol (x1, x2, ...), ssa the versions of a
@@ -1725,25 +1987,42 @@
 \file_if_exist:nTF { magic-r-flowr.mjs }
   { \str_gset:Nn \g__mr_script_str { magic-r-flowr.mjs } }
   { \file_if_exist:nT { \mr@ownfile { magic-r-flowr.mjs } } { \str_gset:Ne \g__mr_script_str { \mr@ownfile { magic-r-flowr.mjs } } } }
-\cs_new:Npn \__mr_helper_cmd:
+% the command runs in the output directory (\__mr_in_outdir:n), so the script is found where the
+% document is ($OLDPWD after the cd: kpsewhich there, or the path beside magic-r.sty). node only
+% starts with a script that exists, and never reads from the terminal (it would wait forever)
+\cs_new:Npn \__mr_helper_args:
   {
-    \str_if_eq:VnTF \g__mr_script_str { magic-r-flowr.mjs }
-      {
-        \sys_if_platform_windows:TF
-          { for~/f~"delims="~\c_percent_str i~in~('kpsewhich~magic-r-flowr.mjs')~do~ \g__mr_node_tl \c_space_tl "\c_percent_str i" }
-          { \g__mr_node_tl \c_space_tl "\c_dollar_str(kpsewhich~magic-r-flowr.mjs)" }
-      }
-      { \g__mr_node_tl \c_space_tl " \g__mr_script_str " }
     \c_space_tl document \g__mr_helper_opts_tl
     \c_space_tl \c__mr_code_str \c_space_tl \c__mr_answer_str
+  }
+\cs_new:Npn \__mr_helper_cmd:
+  {
+    \sys_if_platform_windows:TF
+      {
+        \str_if_eq:VnTF \g__mr_script_str { magic-r-flowr.mjs }
+          { for~/f~"delims="~\c_percent_str i~in~('kpsewhich~magic-r-flowr.mjs')~do~ \g__mr_node_tl \c_space_tl "\c_percent_str i" }
+          { \g__mr_node_tl \c_space_tl " \g__mr_script_str " }
+        \__mr_helper_args: \c_space_tl <NUL
+      }
+      {
+        S=
+        \str_if_eq:VnTF \g__mr_script_str { magic-r-flowr.mjs }
+          { "\c_dollar_str(cd~"\c_dollar_str OLDPWD"~&&~kpsewhich~magic-r-flowr.mjs)" }
+          { " \g__mr_script_str " }
+        ;~case~"\c_dollar_str S"~in~/*)~;;~?*)~S="\c_dollar_str OLDPWD/\c_dollar_str S";;~esac;~
+        if~[~-f~"\c_dollar_str S"~];~then~ \g__mr_node_tl \c_space_tl "\c_dollar_str S" \__mr_helper_args: \c_space_tl </dev/null;~
+        else~echo~"magic-r:~magic-r-flowr.mjs~not~found"~>&2;~false;~fi
+      }
   }
 \AtEndDocument
   {
     \bool_if:NT \g__mr_capture_bool
       {
         \iow_close:N \g__mr_code_iow
+        \__mr_side_close:
         % the answer is stale if the code, the options, or the helper itself changed
         \str_set:Ne \l__mr_md_str { \file_mdfive_hash:n { \c__mr_code_str } \file_mdfive_hash:n { \g__mr_script_str }
+          \file_mdfive_hash:n { \c_sys_jobname_str .mr-play.R } \file_mdfive_hash:n { \c_sys_jobname_str .mr-slice.R }
           \tl_to_str:N \g__mr_helper_opts_tl }
         \file_if_exist:nF { \c__mr_answer_str } { \str_gclear:N \g__mr_flowr_md_str }
         \str_if_eq:VVF \l__mr_md_str \g__mr_flowr_md_str
@@ -1777,10 +2056,11 @@
   if (nzchar(file)) tryCatch(sys.source(file, envir = e), error = function(c) writeLines(paste("@@mr-load:", .mr$one(conditionMessage(c)))));
   .mr$envs[[ctx]] <- e }; .mr$envs[[ctx]] };
 .mr$run <- function(x, e, mode, out) { err <- FALSE; res <- utils::capture.output(withCallingHandlers(tryCatch({
-  v <- withVisible(eval(x, e)); if (mode == "value") writeLines(paste(format(v$value), collapse = ", ")) else if (v$visible) print(v$value) },
+  v <- withVisible(eval(x, e)); if (mode == "value" || mode == "last") writeLines(paste(format(v$value), collapse = ", ")) else if (v$visible && mode != "silent") print(v$value) },
   error = function(c) { err <<- TRUE; writeLines(paste("Error:", .mr$one(conditionMessage(c)))) }),
   warning = function(w) { writeLines(paste("Warning:", .mr$one(conditionMessage(w)))); invokeRestart("muffleWarning") },
   message = function(m) { writeLines(sub("[[:space:]]+$", "", conditionMessage(m))); invokeRestart("muffleMessage") }));
+  if (mode == "silent") res <- grep("^Error:", res, value = TRUE); if (mode == "last" && !err) res <- res[length(res)];
   if (length(res)) writeLines(paste0(out, res)); err };
 .mr$prompts <- function(buf) writeLines(paste0(c(":prompt:", rep(":cont:", length(buf) - 1)), buf));
 .mr$q <- function(marker, ctx, file, mode, lines) { writeLines(c("", paste0("@@mr:", marker, "@@"))); e <- .mr$env(ctx, file);
@@ -1792,7 +2072,8 @@
     writeLines("@@step@@") };
     if (length(buf)) { .mr$prompts(buf); err <- TRUE; writeLines(c(":out:Error: incomplete input", "@@step@@")) } }
   else { p <- tryCatch(parse(text = lines, keep.source = FALSE), error = function(c) c);
-    if (inherits(p, "error")) { err <- TRUE; writeLines(paste("Error:", .mr$one(conditionMessage(p)))) } else for (x in p) err <- .mr$run(x, e, mode, "") || err };
+    if (inherits(p, "error")) { err <- TRUE; writeLines(paste("Error:", .mr$one(conditionMessage(p)))) }
+    else for (i in seq_along(p)) err <- .mr$run(p[[i]], e, if (mode != "yield") mode else if (i < length(p)) "silent" else "last", "") || err };
   writeLines(paste0("@@mr-stat:", round((proc.time()[[3]] - t0) * 1000), ":", if (err) "error" else "ok", "@@")) }}
 \ExplSyntaxOn
 \str_new:N \g__mr_r_run_str
@@ -2140,6 +2421,123 @@
     \iow_open:Nn \g__mr_iow { \c_sys_jobname_str -mr-session.tmp }
     \cs_set_protected:Npn \verbatim@processline { \iow_now:Ne \g__mr_iow { \the \verbatim@line } }
     \verbatim@start
+  }
+
+% \begin{flowrsession}[animate, start=2, listing={...}, rcode] inputs \end{flowrsession}: flowR's
+% REPL runs each line, a command (':dataflow* x <- 1', ':query ...') or R (with the key rcode, as
+% flowR only runs R with its engine r-shell and --r-session-access), and the session shows each input
+% after the prompt R> with what flowR prints for it. On beamer slides the inputs appear one after the
+% other. The script answers \mrFlowrSession{name}{inputs} and a \mrFlowrSessionLine{name}{input}{hex}
+% for every line of output (in hex, so that it may hold any character)
+\int_new:N \g__mr_fsession_int
+\bool_new:N \l__mr_rcode_bool
+\str_new:N \l__mr_json_str
+\keys_define:nn { magic-r / fsession }
+  {
+    animate .bool_set:N = \l__mr_animate_bool ,
+    start   .int_set:N  = \l__mr_start_int ,
+    listing .tl_set:N   = \l__mr_listing_tl ,
+    rcode   .bool_set:N = \l__mr_rcode_bool ,
+    rcode   .default:n  = true ,
+  }
+\NewDocumentCommand \mrFlowrSession { m m }
+  {
+    \cs_gset:cpn { mr@fs@ #1 } {#2}
+    \int_step_inline:nn {#2} { \tl_gclear_new:c { mr@fsl@ #1 @ ##1 } }
+  }
+\NewDocumentCommand \mrFlowrSessionLine { m m m }
+  {
+    % pdfTeX keeps the bytes of UTF-8 (it has no characters above 255), LuaTeX and XeTeX the characters
+    \bool_lazy_or:nnTF { \sys_if_engine_luatex_p: } { \sys_if_engine_xetex_p: }
+      { \str_set_convert:Nnnn \l__mr_tmp_str {#3} { utf8/hex } { } }
+      { \str_set_convert:Nnnn \l__mr_tmp_str {#3} { latin1/hex } { } }
+    \tl_if_exist:cF { mr@fsl@ #1 @ #2 } { \tl_gclear_new:c { mr@fsl@ #1 @ #2 } }
+    \tl_gput_right:ce { mr@fsl@ #1 @ #2 } { { \exp_not:V \l__mr_tmp_str } }
+  }
+\msg_new:nnn { magic-r } { fsession } { flowR~could~not~run~the~session~'#1':~#2 }
+\NewDocumentCommand \mrFlowrSessionFailed { m m } { \msg_warning:nnnn { magic-r } { fsession } {#1} {#2} }
+% a line as a string of JSON
+\cs_new_protected:Npn \__mr_json_put:n #1
+  {
+    \str_set:Nn \l__mr_tmp_str {#1}
+    \use:e
+      {
+        \exp_not:N \str_replace_all:Nnn \exp_not:N \l__mr_tmp_str { \c_backslash_str } { \c_backslash_str \c_backslash_str }
+        \exp_not:N \str_replace_all:Nnn \exp_not:N \l__mr_tmp_str { " } { \c_backslash_str " }
+        \exp_not:N \str_replace_all:Nnn \exp_not:N \l__mr_tmp_str { \char_generate:nn { 9 } { 12 } } { ~ }
+      }
+    \str_put_right:Ne \l__mr_json_str { \str_if_empty:NF \l__mr_json_str { , ~ } " \l__mr_tmp_str " }
+  }
+\cs_new_protected:Npn \__mr_fsession:nn #1#2
+  {
+    \group_begin:
+    \bool_set:Nn \l__mr_animate_bool { \cs_if_exist_p:c { ver@beamer.cls } }
+    \int_set:Nn \l__mr_start_int { 1 }
+    \keys_set:nn { magic-r / fsession } {#1}
+    \int_gincr:N \g__mr_fsession_int
+    \tl_set:Ne \l__mr_gname_tl { fsession- \int_use:N \g__mr_fsession_int }
+    \seq_clear:N \l__mr_lines_seq
+    \ior_open:Nn \g__mr_ior {#2}
+    \ior_str_map_inline:Nn \g__mr_ior { \tl_if_blank:nF {##1} { \seq_put_right:Nn \l__mr_lines_seq {##1} } }
+    \ior_close:N \g__mr_ior
+    \str_clear:N \l__mr_json_str
+    \seq_map_function:NN \l__mr_lines_seq \__mr_json_put:n
+    \__mr_request:nnnn { session } { \l__mr_gname_tl } { }
+      { , ~ "inputs": [ \l__mr_json_str ] \bool_if:NT \l__mr_rcode_bool { , ~ "rcode": true } }
+    \bool_set:Nn \l_mr_r_pending_bool { ! \cs_if_exist_p:c { mr@fs@ \l__mr_gname_tl } }
+    % the steps: an input after the prompt (its command between invisible delimiters, styled), then
+    % its output
+    \seq_clear:N \l__mr_steps_seq
+    \seq_map_indexed_inline:Nn \l__mr_lines_seq
+      {
+        \regex_extract_once:nnNTF { \A\s*(:\S*)(.*)\Z } {##2} \l_tmpa_seq
+          {
+            \tl_set:Ne \l__mr_step_tl
+              { { :flowr: | fc | \seq_item:Nn \l_tmpa_seq { 2 } | fc | \seq_item:Nn \l_tmpa_seq { 3 } } }
+          }
+          { \tl_set:Nn \l__mr_step_tl { { :flowr: ##2 } } }
+        \bool_if:NF \l_mr_r_pending_bool
+          {
+            \tl_if_exist:cT { mr@fsl@ \l__mr_gname_tl @ ##1 }
+              { \tl_map_inline:cn { mr@fsl@ \l__mr_gname_tl @ ##1 } { \tl_put_right:Nn \l__mr_step_tl { { :out: ####1 } } } }
+          }
+        \seq_put_right:NV \l__mr_steps_seq \l__mr_step_tl
+      }
+    \int_set:Nn \l__mr_n_int { \seq_count:N \l__mr_steps_seq }
+    \bool_if:NTF \l__mr_animate_bool
+      {
+        \int_step_inline:nn { \l__mr_n_int }
+          {
+            \__mr_session_file:n {##1}
+            \use:e
+              {
+                \exp_not:N \only
+                < \int_eval:n { \l__mr_start_int + ##1 - 1 } \int_compare:nNnT {##1} = \l__mr_n_int { - } >
+              }
+              { \__mr_fsession_typeset: }
+          }
+      }
+      { \__mr_session_file:n { \int_use:N \l__mr_n_int } \__mr_fsession_typeset: }
+    \bool_if:NT \l_mr_r_pending_bool { \mr@r@pending }
+    \group_end:
+  }
+\cs_new_protected:Npn \__mr_fsession_typeset:
+  {
+    \use:e
+      {
+        \exp_not:N \mr@r@input { lFlowrConsole }
+          { numbers=none, showlines=true, breaklines, \exp_not:V \l__mr_listing_tl } { \l__mr_file_str }
+      }
+  }
+\newenvironment { flowrsession }
+  {
+    \tl_clear:N \l__mr_opts_tl
+    \cs_set_eq:NN \do \@makeother \dospecials \char_set_catcode_active:N \^^M
+    \peek_meaning:NTF [ \__mr_session_opts:w \__mr_session_start:
+  }
+  {
+    \iow_close:N \g__mr_iow
+    \exp_args:NV \__mr_fsession:nn \l__mr_opts_tl { \c_sys_jobname_str -mr-session.tmp }
   }
 \ExplSyntaxOff
 

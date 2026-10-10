@@ -1,0 +1,15 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: a session
+\g__mr_iow=\write...
+SESSION: :flowr:|fc|:dataflow*|fc| x <- "a\b"
+SESSION: :out:flowchart TD
+SESSION: :out:    n0(["x"]) % #1 {braces} \\ end
+SESSION: :flowr:x + 1
+SESSION: :out:You are not allowed to execute arbitrary R code.
+============================================================
+TEST 1: the request
+============================================================
+REQUEST: ## magic-r request {"kind":"session", "name":"fsession-1", "inputs":[":dataflow* x <- \"a\\b\"", "x + 1"]}
+============================================================

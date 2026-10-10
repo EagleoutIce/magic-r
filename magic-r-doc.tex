@@ -43,9 +43,13 @@
 \lstcolorlet{literals}{latte-green}
 \lstcolorlet{comments}{latte-subtle}
 \lstcolorlet{command}{plum}              % LaTeX macros
-% the commands of magic-r get their color where they link (\doc@link), the environments here
-\xlstlangoverride{latex}{morekeywords=[5]{mr,rsession,mrfile,magic-r},
-  alsoletter={\\\#@-},escapeinside={}{},deletedelim=[is]{|plain|}{|plain|}}
+\colorlet{plum-dark}{plum!62!black}      % environments, darker than the commands
+% the commands of magic-r get their color where they link (\doc@link), the environments here, darker
+% than the commands; the LaTeX of the examples shows what to type: ':yields:' as it is, not its arrow
+\xlstlangoverride{latex}{morekeywords=[5]{magic-r},morekeywords=[3]{mr,rsession,flowrsession,mrfile},
+  keywordstyle=[3]{\color{plum-dark}},
+  alsoletter={\\\#@-},escapeinside={}{},deletedelim=[is]{|plain|}{|plain|},
+  add to literate={:yields:}{{{:yields:}}}8}
 
 \usepackage[colorlinks,allcolors=cyan!65!black]{hyperref}
 \usepackage[capitalise,noabbrev]{cleveref}
@@ -129,7 +133,7 @@
 \NewDocumentCommand\key{O{}m}{\doc@target{key.#2}\doc@register{#2}{key.#2}%
   \TT{#2}\index{#2@\texttt{#2} \idxkind{key}\doc@needs{#1}\string|hyperpage}}
 \NewDocumentCommand\env{O{}m}{\doc@target{env.#2}\doc@register{#2}{env.#2}%
-  \TT{#2}\index{#2@\texttt{#2} \idxkind{environment}\doc@needs{#1}\string|hyperpage}}
+  \TT{\color{plum-dark}#2}\index{#2@\texttt{\color{plum-dark}#2} \idxkind{environment}\doc@needs{#1}\string|hyperpage}}
 \NewDocumentCommand\option{O{}mm}{\doc@target{opt.#2}\doc@register{#2}{opt.#2}\TT{\bfseries\color{plum}#2}%
   \index{#2@\texttt{\bfseries\color{plum}#2} \idxkind{package option}\doc@needs{#1}\string|hyperpage}\,%
   \textcolor{gray}{\small(\ifx\relax#3\relax no default\else default \TT{#3}\fi)}}
@@ -217,7 +221,7 @@
 \def\db@cell#1#2#3#4{\TT{#1}\,\textsuperscript{\textcolor{gray}{#3}} & \textcolor{gray}{\scriptsize\TT{#2}} & #4}
 \begingroup
 \renewcommand\mrPackage[4][cran]{\global\db@n\z@\global\advance\dbpackages\@ne
-  \def\N{\db@names}\def\T##1{\db@names}\def\U##1{\db@names}#4%
+  \def\N{\db@names}\def\T##1{\db@names}\def\U##1{\db@names}\def\S##1{}\def\D##1{}#4%
   \xappto\db@rows{\noexpand\db@cell{#2}{#3}{\csname db@docs@#1\endcsname}{\the\db@n}}%
   \global\advance\db@col\@ne
   \ifnum\db@col=3 \global\db@col\z@\gappto\db@rows{\tabularnewline}\else\gappto\db@rows{&}\fi}
@@ -339,10 +343,16 @@ A copy of the package in a folder of the project needs no change of \TT{TEXINPUT
 \item \option[flowr]{graphs}{false} load TikZ for the graphs of flowR (\cref{sec:graphs}).
 \item \option[flowr]{graphs-gray}{false} draw the graphs in shades of gray, for print.
 \item \option[flowr]{graphs-legend}{false} give graphs a legend by default (\cref{sec:graphs}).
+\item \option[flowr]{graphs-lines}{false} show the line of its code in every node of a graph by default (\cref{sec:graphs}).
 \item \option[flowr]{playground}{false} a button beside every listing opens it in flowR's playground (\cref{sec:playground}).
+\item \option[flowr]{arrowroute}{auto} the route of arrows: \TT{auto} lets an arrow to a definition above run
+  over the top where it can, \TT{side} keeps every arrow beside the code (\cref{sec:arrows}).
 \item \option[flowr]{interactive}{} load \pkg{ocgx2} for listings whose arrows a click shows or hides (key
   \TT{mrinteractive}), \TT{interactive=all} makes every listing so (\cref{sec:arrows}).
 \item \option[r]{eval}{false} let R compute values and sessions (\cref{sec:r}).
+\item \option[flowr]{cleanup}{true} the script removes the side files of older versions of magic-r, one per
+  listing (\TT{\textbackslash jobname.mr-play-3.R}), now one file of each kind holds all listings.
+  \TT{cleanup=false} keeps them.
 \item \option{xlistings}{} options for \pkg{xlistings}, e.g.\ \TT{xlistings=\{style=\{plain number\}\}}.
   They only count when magic-r loads \pkg{xlistings}. A document that loads \pkg{xlistings} itself
   (also by its path) may do so before or after magic-r, magic-r uses it as it is. magic-r needs
@@ -359,6 +369,9 @@ topic: R's manual (\cmd{mrDocsRManual}) for R's own packages, \href{https://rdrr
 macros to link elsewhere. A package is only read when a document uses it. The database holds all
 of R's own and recommended packages, the whole tidyverse, and other popular packages,
 \the\dbpackages{} in all (\cref{sec:dbtable}).
+An S3 method without a page of its own links to its generic: \bmr{print.character(x)} and
+\bmr{as.data.frame.matrix(m)} link to \bmr{print} and \bmr{as.data.frame}. The database knows the
+generics of each package, and a method the document defines links to its definition.
 
 \subsection{Attaching Packages}
 As in R, the attached packages form a search path, and a name links to the first package on it
@@ -386,13 +399,15 @@ In a displayed listing, these define \TT{x}:
   listing has a variable of the same name.
 \end{itemize}
 A use of \TT{x} links to the definition in the same listing, else to the last one before, else to
-the first one after. In \bmr{get("x")}, \bmr{get0("x")}, and \bmr{exists("x")}, the string links to
+the first one after (not in a listing flowR read: there a use only links to what flowR finds, or to a
+definition in the same or an earlier listing). In \bmr{get("x")}, \bmr{get0("x")}, and \bmr{exists("x")}, the string links to
 the definition and keeps its color. Functions (\bmr{f <- function(x)}, \expandafter\bmr\expandafter{\doclambda}) look like the
 functions of packages, variables keep the color of the code, and parameters get the color
 \TT{mrparam} (a shade of the color of packages, \code|\colorlet{mrparam}{...}| after
 \TT{\textbackslash begin\{document\}} changes it). An indented assignment only counts within its listing.
 \cmd{mrSetStyle}\TT{\{kind\}\{style\}} sets the style of a kind of name: \TT{function} (of packages),
-\TT{user} (functions of the document), \TT{variable}, \TT{parameter}, \TT{package}, \TT{operator}, and
+\TT{user} (functions of the document), \TT{variable}, \TT{parameter}, \TT{package}, \TT{data} (data sets of
+packages, as \bmr{relig_income}, plain as variables by default), \TT{operator}, and
 \TT{argument} (\bmr{n} in \bmr{head(x, n = 3)}, plain by default), e.g.\ \code|\mrSetStyle{user}{\color{gray}}|.
 The key \key{mrdefinitions} switches this off (\TT{false}) or keeps all definitions of a listing
 local (\TT{local}). Definitions come from the aux file, so they need a second run, as references do.
@@ -488,7 +503,8 @@ warning says why and \cref{sec:plain} still applies. The key \key[flowr]{mrcaptu
 magic-r uses the first of these backends that works, or the one the option \TT{flowr-backend} sets:
 \begin{description}
 \item \backend{node} the flowR command line: the option \TT{flowr-command}, \TT{\$MAGIC\_R\_FLOWR}, \TT{flowr} on
-  the path, or the flowR of \TT{npm install -g @eagleoutice/flowr}. A local build of flowR works as well:
+  the path, or the flowR of \TT{npm install -g @eagleoutice/flowr} (an empty \TT{\$MAGIC\_R\_FLOWR}
+  turns this backend off). A local build of flowR works as well:
   \code|flowr-command={node ~/flowr/dist/src/cli/flowr.js}|.
 \item \backend{docker} the image of the option \TT{flowr-image} (default \TT{eagleoutice/flowr:latest}), if
   docker has it.
@@ -590,9 +606,13 @@ print(summary(data))
 \subsection{Drawing Arrows to Definitions}\label{sec:arrows}
 \backends{node,docker,r} With the option \TT{graphs}, the key \key[flowr]{mrarrows}\TT{=\{criteria\}}
 draws an arrow from the name each criterion points at to every definition it reads. Other names get
-no arrows. An arrow runs below the line of the use, along a lane left of the code, and below the
-line of the definition into it, so it crosses no letters. An arrow within one line stays below that
-line. Arrows that would overlap get their own height below a line and their own lane. Each criterion (in an interactive listing, each variable) has a color (\TT{mrarrow1} to
+no arrows. An arrow to a definition above leaves its name at the top, runs below the line above, and goes
+straight up into the definition, if no letter and no other arrow is in its way. Every other arrow
+runs below the line of the use, along a lane left of the code, and below the line of the definition
+into it, so it crosses no letters. The key \key[flowr]{mrarrowroute}\TT{=side} (or the option
+\TT{arrowroute=side}) keeps all arrows beside the code. An arrow within one line stays below that
+line. Arrows that would overlap get their own height below a line and their own lane, and arrows that
+share a name spread over its width, in the order of the sides they come from. Each criterion (in an interactive listing, each variable) has a color (\TT{mrarrow1} to
 \TT{mrarrow5}, in order), the names of the
 criteria get a darker band and the definitions a lighter one. \cmd[flowr]{mrArrowGap},
 \cmd[flowr]{mrArrowTrack}, and \cmd[flowr]{mrArrowLane} set the distances, the TikZ style
@@ -605,6 +625,21 @@ for (v in c(1, 4, 9))
   total <- total + v
 count <- count + 1
 print(total)
+\end{mrdemo}
+
+The key \key[flowr]{mrcallsarrows}\TT{=\{criteria\}} draws the calls, along a lane right of the code where they
+cannot go over the top, apart from the dataflow at the left (the TikZ style \TT{mr call arrow} sets
+their look): from each
+call a criterion points at to the definition of the function it calls (also through another name,
+as \bmr{h <- f}). A criterion that points at the name of a function takes all of its calls, and
+\TT{mrcallsarrows=all} every call of a function of the listing. Calls of functions of packages get no
+arrow.
+\begin{mrdemo}[mrcallsarrows=all]
+square <- function(x) x^2
+add <- function(a, b) a + b
+total <- add(square(3), square(4))
+twice <- function(v) add(v, v)
+twice(total)
 \end{mrdemo}
 
 With the option \TT{interactive} (it loads \pkg{ocgx2}), the key \key[flowr]{mrinteractive} makes
@@ -634,6 +669,8 @@ to the functions of R. Their keys:
 \begin{description}
 \item \key[flowr]{legend}\TT{=true|false} a legend below the graph that names its shapes and edges
   (default: the option \TT{graphs-legend}),
+\item \key[flowr]{lines}\TT{=true|false} the line of its code in every node, after the id of a vertex
+  (\cmd[flowr]{mrGraphLine} typesets it, default: the option \TT{graphs-lines}),
 \item \key[flowr]{rowsep}\TT{=cm} the least distance between rows (default \TT{0.2}), rows with edges
   running sideways get more,
 \item \key[flowr]{mermaid}\TT{=text} instead of the graph a link to flowR's own drawing of it on
@@ -657,11 +694,11 @@ print(total)
 \Cref{fig:graphs} shows the graphs of this listing.
 \begin{figure}[htbp]
 \begin{latex}
-\mrDataflowGraph[legend]{loop} \hfill
+\mrDataflowGraph[legend,lines]{loop} \hfill
 \mrControlFlowGraph[legend,rowsep=0.3]{loop}
 \end{latex}
 \begin{center}
-\mrDataflowGraph[legend]{loop}\hfill
+\mrDataflowGraph[legend,lines]{loop}\hfill
 \mrControlFlowGraph[legend,rowsep=0.3]{loop}
 \end{center}
 \caption{The dataflow graph and the control flow graph of the listing \TT{loop}.}\label{fig:graphs}
@@ -711,7 +748,7 @@ for a listing. By default the button is a thin gray ring,
 \cmd[flowr]{mrPlayStyle}\TT{\{filled\}} (as in this manual, with \TT{mrplay} a blue) a disc. The color
 \TT{mrplay} and \cmd[flowr]{mrPlaySize} change it, redefining \cmd[flowr]{mrPlayButton} replaces it.
 The button sits \cmd[flowr]{mrPlayOffset} (\TT{.6em}) right of the text. A negative offset moves it
-into the text, e.g.\ \code|\renewcommand\mrPlayOffset{-3em}| left of the badge of \pkg{xlistings}.
+into the text, e.g.\ \code|\renewcommand{\mrPlayOffset}{-3em}| left of the badge of \pkg{xlistings}.
 Redefining \cmd[flowr]{mrPlaceButton}\TT{\{button\}} puts it anywhere, and the link moves with it.
 
 \subsection{Requesting flowR Queries}
@@ -740,6 +777,10 @@ only if they changed. Queries share one environment, in order, like a notebook.
 \item \cmd[r]{mrValue}\TT{\{expr\}} (verbatim) and \cmd[r]{mrValueOf}\TT{\{expr\}} (a regular argument): the
   value as text, \mrValue{format(Sys.Date(), "%Y")} or \mrValue{letters[1:3]}.
 \item \cmd[r]{mrEval}\TT{\{expr\}}, \cmd[r]{mrEvalOf}: what R prints, as code: \mrEval{range(c(1, 4, 9))}.
+\item \cmd[r]{mrYield} in an escape of a listing: the value of its code up to there, as in
+  \TT{print(x) \# :yields: !*\textbackslash mrYield*!} (\TT{:yields:} typesets as \(\rightarrow\)). R runs
+  the code of the listing since its start or the last \cmd[r]{mrYield}, so each line runs once, in
+  the environment of the other queries, and later listings see what earlier ones defined.
 \item \cmd[r]{mrValueInto}\TT{\textbackslash cs\{expr\}} stores the value, \cmd[r]{mrIfError}\TT{\{then\}\{else\}}
   tells whether the last query failed, \cmd[r]{mrRTime} and \cmd[r]{mrRTimeText} the time it took.
 \item \cmd[r]{mrSource}\TT{\{file\}} answers the following queries in an environment with the file
@@ -749,6 +790,11 @@ only if they changed. Queries share one environment, in order, like a notebook.
   \cmd[r]{mrRRun}\TT{\{auto|always|never\}} choose how R runs. \cmd[r]{mrEvalSetFormat}, \cmd[r]{mrValueSetFormat},
   and \cmd[r]{mrSetErrorFormat} choose how answers look.
 \end{description}
+\begin{mrdemo}
+squares <- (1:4)^2
+sum(squares)  # :yields: !*\mrYield*!
+rev(squares)  # :yields: !*\mrYield*!
+\end{mrdemo}
 
 \subsection{Showing Console Sessions}
 The environment \env[r]{rsession} runs its lines like R's console (an input may span lines) in an
@@ -768,6 +814,22 @@ mean(x)
 summary(x > 10)
 \end{rsession}
 
+\subsection{Showing Sessions of flowR's REPL}
+\backends{node,docker} The environment \env[flowr]{flowrsession} runs its lines in flowR's REPL and shows
+each after the prompt \TT{R>}, with what flowR prints for it: a command (\TT{:query}, \TT{:dataflow*},
+\TT{:normalize*}, see \TT{:help}) in the color of keywords, or R. flowR only runs R with the key
+\key[flowr]{rcode} (its engine \TT{r-shell} and \TT{--r-session-access}), else it says that it may not.
+The keys \TT{animate}, \TT{start}, and \TT{listing} are those of \env[r]{rsession}. The output is ASCII,
+as listings reads no other characters (\TT{\textasciitilde} for a time, \TT{+} for a branch of a tree).
+\begin{latex}
+\begin{flowrsession}
+:query [{"type":"linter","rules":["unused-definitions"]}] "x <- 1; y <- x"
+\end{flowrsession}
+\end{latex}
+\begin{flowrsession}
+:query [{"type":"linter","rules":["unused-definitions"]}] "x <- 1; y <- x"
+\end{flowrsession}
+
 \section{Known Limitations}
 \needsnothing{} Without flowR:
 \begin{itemize}
@@ -786,6 +848,8 @@ summary(x > 10)
 \item a listing with \TT{mrslicemode=hide} shows all of its code again once, after its code changed,
 \item a listing with arrows is not broken across pages,
 \item \backend{web} only knows packages: no names, lines, slices, graphs, or queries,
+\item in a control flow graph, the body of a function is a graph of its own, which the calls of the
+  function point to, and flowR has no edge for a \bmr{return()} that leaves a function early,
 \item flowR only sees the text of the escapes of the default \TT{escapeinside=\{!*\}\{*!\}}. Other
   escapes (another \TT{escapeinside}, \TT{escapechar}, \TT{mathescape}, \TT{texcl}) work, but marks
   right of them in the same line can be off.
@@ -818,8 +882,8 @@ name, then \href{https://search.r-project.org}{search.r-project.org}) or is drop
 requests every page of a database and lists the ones that fail (rdrr.io can lag behind CRAN),
 \TT{--prune} moves or drops their names as \TT{generate} does. A weekly job of the repository
 verifies the database.
-\begin{bash}
-node magic-r-flowr.mjs generate        # tools/packages.txt -> magic-r-links.cfg
+\begin{bash}[deletekeywords={generate}]
+node magic-r-flowr.mjs generate        # writes magic-r-links.cfg from tools/packages.txt
 node magic-r-flowr.mjs verify          # lists the pages that fail
 node magic-r-flowr.mjs verify --prune  # ... and moves or drops their names
 \end{bash}

@@ -1,0 +1,19 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: flowR read this listing
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+============================================================
+TEST: flowR did not read this one
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+INTERNAL: mr.4.x
+============================================================
+TEST: the later definition
+TARGET: mr.4.x
+COPY: <-
+============================================================
+TEST 1: the command
+============================================================
+GUARD: yes
+STDIN: yes
+============================================================

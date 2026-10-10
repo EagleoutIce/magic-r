@@ -1,6 +1,7 @@
 % Arrows from a fixture: the names of an arrow become nodes, the last one draws the arrows. In an
 % interactive listing each variable is an optional content group, shown at first if a criterion
-% points at it, and a click on one of its names toggles it.
+% points at it, and a click on one of its names toggles it. A call arrow has a style of its own, and an
+% arrow over the top (lane -1) leaves its name at the top.
 \input{regression-test}
 \documentclass{article}
 \usepackage[database=testlinks,interactive=all]{magic-r}
@@ -15,7 +16,7 @@
 \let\mrtest@ocg\ocg
 \def\ocg#1#2#3{\typeout{OCG: #1 #2 #3}\mrtest@ocg{#1}{#2}{#3}}
 \let\mrtest@arrow\mr@arrow
-\def\mr@arrow#1#2#3#4#5#6#7#8{\typeout{ARROW: #1:#2 -> #3:#4 group #5}\mrtest@arrow{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}}
+\def\mr@arrow#1#2#3#4#5#6#7#8#9{\typeout{ARROW: #2:#3 -> #4:#5 group #6 (#1, lane #9)}\mrtest@arrow{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}{#9}}
 \makeatother
 \START
 \setbox0\vbox{%
@@ -28,6 +29,12 @@ total <- total + v
 \begin{mr}[mrinteractive=false,mrarrows={2@y}]
 x <- 1
 y <- x
+\end{mr}
+\TYPE{---- calls, over the top}
+\begin{mr}[mrinteractive=false,mrcallsarrows={3@f},mrarrowroute=auto]
+f <- function(n) n
+y <- 2
+f(y)
 \end{mr}
 }
 \END

@@ -8,6 +8,15 @@ LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
 TARGET: mr.2.y
 COPY: <-
 INTERNAL: mr.2.x
+TARGET: mr.2.avg
+COPY: <-
+TARGET: mr.2.df@1
+TARGET: mr.2.df
+TARGET: mr.2.n@1
+TARGET: mr.2.n
+INTERNAL: mr.2.n@1
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/print.html
+INTERNAL: mr.2.y
 ============================================================
 TEST 1: the code
 ============================================================
@@ -16,5 +25,7 @@ CODE: x <- y
 CODE: ## magic-r block 2
 CODE: x <- r"(sum "of" mean)" + R'-[it's sum]-' + sum(1)
 CODE: y <- mean(x) + 1 # note
+CODE: avg <- function(df, n = 2) df / n
+CODE: print(y) # ^^e2^^86^^92 42
 CODE: 
 ============================================================

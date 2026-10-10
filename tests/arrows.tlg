@@ -1,5 +1,9 @@
 This is a generated file for the l3build validation system.
 Don't change this file in any respect.
+OCG: total (3) mr-a-2-3-10 1
+OCG: total (1) mr-a-2-1-1 0
+OCG: v (3) mr-a-2-3-18 0
+OCG: v (2) mr-a-2-2-1 0
 TARGET: mr.2.total
 TOGGLE: mr-a-2-1-1
 COPY: <-
@@ -10,17 +14,29 @@ COPY: <-
 TOGGLE: mr-a-2-3-10
 TOGGLE: mr-a-2-3-18
 OCG: total (3) mr-a-2-3-10 1
-ARROW: 3:10 -> 1:1 group 1
+ARROW: 3:10 -> 1:1 group 1 (mr arrow, lane 0)
 OCG: total (1) mr-a-2-1-1 0
-ARROW: 3:10 -> 1:1 group 1
+ARROW: 3:10 -> 1:1 group 1 (mr arrow, lane 0)
 OCG: v (3) mr-a-2-3-18 0
-ARROW: 3:18 -> 2:1 group 2
+ARROW: 3:18 -> 2:1 group 2 (mr arrow, lane 0)
 OCG: v (2) mr-a-2-2-1 0
-ARROW: 3:18 -> 2:1 group 2
+ARROW: 3:18 -> 2:1 group 2 (mr arrow, lane 0)
 ---- not interactive
 TARGET: mr.3.x
 COPY: <-
 TARGET: mr.3.y
 COPY: <-
 INTERNAL: mr.3.x
-ARROW: 2:6 -> 1:1 group 1
+ARROW: 2:6 -> 1:1 group 1 (mr arrow, lane 0)
+---- calls, over the top
+TARGET: mr.4.f
+COPY: <-
+TARGET: mr.4.n@1
+TARGET: mr.4.n
+INTERNAL: mr.4.n@1
+TARGET: mr.4.y
+COPY: <-
+INTERNAL: mr.4.f
+INTERNAL: mr.4.y
+ARROW: 3:1 -> 1:1 group 1 (mr call arrow, lane -1)
+ARROW: 3:3 -> 2:1 group 2 (mr arrow, lane -1)

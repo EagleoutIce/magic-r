@@ -191,7 +191,7 @@ test('failures become a status, never a missing file', async() => {
 test('packages are cached per flowR and package version', async() => {
 	const cache = tmp();
 	const first = await document('library(dplyr)\n', { noCache: false, cache });
-	const file = path.join(cache, 'flowr-2.15.10-f3', 'dplyr@1.2.1.cfg');
+	const file = path.join(cache, 'flowr-2.15.10-f4', 'dplyr@1.2.1.cfg');
 	assert.ok(fs.existsSync(file));
 	fs.writeFileSync(file, '\\mrPackage{dplyr}{1.2.1}{\\N{cached,}}\n');
 	const second = await document('library(dplyr)\n', { noCache: false, cache });
@@ -408,15 +408,15 @@ test('a call over several lines marks all of them, a string or comment does not 
 
 test('arrows start only at the names of the criteria, in their colors', () => {
 	assert.deepEqual(m.arrowTexts('5', flowAnswer, flowSource, ['4@p']), [
-		'\\mrFlowArrow{5}{4}{3}{2}{1}{1}{0}{0}{0}', '\\mrFlowArrowCriterion{5}{4}{3}{1}'
+		'\\mrFlowArrow{5}{4}{3}{2}{1}{1}{0}{0}{0/1/1/1/1/33}', '\\mrFlowArrowCriterion{5}{4}{3}{1}'
 	]);
 	assert.deepEqual(m.arrowTexts('5', flowAnswer, flowSource, ['4@f', ' 4:3']), [
-		'\\mrFlowArrow{5}{4}{1}{1}{1}{1}{1}{0}{1}', '\\mrFlowArrow{5}{4}{3}{2}{1}{2}{0}{0}{0}',
+		'\\mrFlowArrow{5}{4}{1}{1}{1}{1}{1}{0}{1/1/1/1/1/33}', '\\mrFlowArrow{5}{4}{3}{2}{1}{2}{0}{0}{0/1/1/1/1/33}',
 		'\\mrFlowArrowCriterion{5}{4}{1}{1}', '\\mrFlowArrowCriterion{5}{4}{3}{2}'
 	]);
 	assert.deepEqual(m.place('3@[1]p', flowSource), [3, 9]);
 	// a use in the line of its definition stays below it, apart from the arrows that leave the line
-	assert.deepEqual(m.arrowTracks([{ lu: 3, cu: 32, ld: 1, cd: 1 }, { lu: 3, cu: 32, ld: 3, cd: 23 }])
+	assert.deepEqual(m.arrowTracks([{ lu: 3, cu: 32, ld: 1, cd: 1 }, { lu: 3, cu: 32, ld: 3, cd: 23 }], [], 'side')
 		.map(a => [a.ut, a.dt, a.lane]), [[1, 0, 0], [0, 0, 0]]);
 });
 
@@ -509,7 +509,7 @@ test('arrows: one per definition read, none for other names, tracks apart in man
 			const lu = 1 + Math.floor(r() * 8), ld = 1 + Math.floor(r() * 8);
 			return { lu, cu: 1 + Math.floor(r() * 30), ld, cd: 1 + Math.floor(r() * 30) };
 		});
-		const placed = m.arrowTracks(arrows.map(a => ({ ...a })));
+		const placed = m.arrowTracks(arrows.map(a => ({ ...a })), [], 'side');
 		// segments below one line that overlap are on different tracks, lanes that overlap differ
 		const segs = placed.flatMap(a => a.lu === a.ld ? [[a.lu, Math.min(a.cu, a.cd), Math.max(a.cu, a.cd), a.ut]]
 			: [[a.lu, 0, a.cu, a.ut], [a.ld, 0, a.cd, a.dt]]);
@@ -557,14 +557,17 @@ test('links into flowR\'s playground carry the code, marks, and a cursor', () =>
 	assert.deepEqual(m.playgroundTexts(code.replace('"block":"3"', '"block":"9"')), []);
 });
 
-test('the playground gets the code with its indentation from the file of its listing', () => {
+test('the playground gets the code with its indentation from its part of the file of the document', () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'magic-r-play-'));
 	const cwd = process.cwd();
 	try {
 		process.chdir(dir);
-		fs.writeFileSync('doc.mr-play-3.R', 'for (v in x)\n  total <- total + v\n\n');
+		// one file for all listings, a part for each
+		fs.writeFileSync('doc.mr-play.R', '## magic-r part 2\nx <- 1\n## magic-r part 3\nfor (v in x)\n  total <- total + v\n\n');
+		assert.deepEqual(m.sideLines({ file: 'doc.mr-play.R', part: 2 }), ['x <- 1']);
+		assert.equal(m.sideLines({ file: 'doc.mr-play.R', part: 9 }), undefined);
 		const code = ['## magic-r block 3', 'for (v in x)', 'total <- total + v',
-			'## magic-r request {"kind":"playground","name":"pg-3","block":"3","file":"doc.mr-play-3.R","marks":["2@[2]total"]}'].join('\n');
+			'## magic-r request {"kind":"playground","name":"pg-3","block":"3","file":"doc.mr-play.R","part":"3","marks":["2@[2]total"]}'].join('\n');
 		const [text] = m.playgroundTexts(code);
 		const hash = new URLSearchParams(/\{pg-3\}\{(.*)\}$/.exec(text)[1]);
 		assert.equal(Buffer.from(hash.get('c').slice(1), 'base64url').toString(), 'for (v in x)\n  total <- total + v');
@@ -644,4 +647,227 @@ test('a page that does not answer is kept, not dropped', async t => {
 	assert.deepEqual([r.checked, r.failed, r.unreachable], [2, 1, 1]);
 	assert.deepEqual([...m.databaseUrls(r.text).values()].flat(), ['pkg::busy']);
 	assert.equal(fetch.mock.calls.filter(c => c.arguments[0].endsWith('busy.html')).length, 3);
+});
+
+test('call arrows: from a call to the name of the function it calls', () => {
+	const answer = structuredClone(flowAnswer);
+	answer.dataflow.graph.edgeInformation.find(([id]) => id === 8)[1].push([3, { types: 4 }]);
+	// a call that cannot go over the top runs along the lane right of the code (1000)
+	const call = '\\mrFlowCallArrow{5}{4}{1}{1}{1}{1}{0}{0}{1000/1/1/1/1/33}';
+	assert.deepEqual(m.arrowTexts('5', answer, flowSource, [], false, ['4@f']), [call, '\\mrFlowArrowCriterion{5}{4}{1}{1}']);
+	// the name of the function: all of its calls
+	assert.deepEqual(m.arrowTexts('5', answer, flowSource, [], false, ['1@f']), [call, '\\mrFlowArrowCriterion{5}{1}{1}{1}']);
+	assert.deepEqual(m.arrowTexts('5', answer, flowSource, [], false, ['all']), [call]);
+	// a call of a function of a package has no arrow
+	assert.deepEqual(m.arrowTexts('5', flowAnswer, flowSource, [], false, ['all']), []);
+});
+
+test('arrows over the top: only to a definition above, and only where no letter is in the way', () => {
+	const lines = ['total <- 0', '', 'x <- total', '  y <- total', 'zz <- 1', 'yy <- 2', '    total'];
+	// line 2 is empty: straight up out of the use, below line 1 into the definition
+	const [up] = m.arrowTracks([{ lu: 3, cu: 6, nu: 5, ld: 1, cd: 1, nd: 5 }], lines);
+	assert.deepEqual([up.lane, up.ut], [-2, 0]);
+	// letters above the use but not above the definition: below line 6, then up into it
+	const [late] = m.arrowTracks([{ lu: 7, cu: 5, nu: 5, ld: 4, cd: 8, nd: 1 }], [...lines.slice(0, 4), 'zzzzzzz', 'yyyyyyy', '    total']);
+	assert.deepEqual([late.lane, late.ut], [-1, 0]);
+	// 'x' and 'total' of line 3 are in both ways of the arrow from line 4: around the side
+	const [side] = m.arrowTracks([{ lu: 4, cu: 8, nu: 5, ld: 1, cd: 1, nd: 1 }], lines);
+	assert.ok(side.lane >= 0);
+	// a definition below, and the route 'side': around the side
+	assert.ok(m.arrowTracks([{ lu: 1, cu: 1, nu: 5, ld: 3, cd: 6, nd: 5 }], lines)[0].lane >= 0);
+	assert.ok(m.arrowTracks([{ lu: 3, cu: 6, nu: 5, ld: 1, cd: 1, nd: 5 }], lines, 'side')[0].lane >= 0);
+	// two arrows into one name, each straight up, below the line of the definition on tracks of their own
+	const two = m.arrowTracks([{ lu: 3, cu: 6, nu: 5, ld: 1, cd: 1, nd: 5 }, { lu: 3, cu: 1, nu: 1, ld: 1, cd: 1, nd: 5 }], lines);
+	assert.deepEqual(two.map(a => a.lane), [-2, -2]);
+	assert.notEqual(two[0].ut, two[1].ut);
+});
+
+test('the control flow graph of functions: statements, bodies, calls, exits, and returns', () => {
+	// flowR 2.15.10 on the code below: each body is a graph of its own, return() ends h before "h end"
+	const answer = JSON.parse(fs.readFileSync(path.join(here, 'control-flow-calls.json'), 'utf8'));
+	const lines = ['g <- function(a) {', '  a', '  "g end"', '}', 'h <- function() {', '  g(return("h early"))', '  "h end"', '}', 'h() # -> "h early"'];
+	const text = m.controlFlowGraph('cf', answer, lines);
+	const nodes = [...text.matchAll(/\\mrGraphNode\[[^\]]*\]\{(\w+)\}\{[^}]*\}\{[^}]*\}\{(\w+)\}\{([^}]*)\}/g)].map(x => [x[2], x[3]]);
+	// a statement each, not one block of the three of the top level
+	assert.deepEqual(nodes.filter(([k]) => k !== 'exit' && k !== 'dead').map(([, l]) => l).sort(), ['"g end"', 'a', 'g <- function(a)', 'g(return("h early"))',
+		'h <- function()', 'h()', 'return("h early")'].sort());
+	assert.deepEqual(nodes.filter(([k]) => k === 'exit').map(([, l]) => l).sort(), ['end', 'end of g', 'end of h']);
+	// "h end" follows the return, flowR never reaches it: dimmed
+	assert.deepEqual(nodes.filter(([k]) => k === 'dead').map(([, l]) => l), ['"h end"']);
+	const kinds = [...text.matchAll(/\\mrGraphPath\{(\w+)\}/g)].map(x => x[1]);
+	assert.deepEqual(['body', 'calls', 'returns', 'unreach', 'forces'].map(k => kinds.filter(x => x === k).length), [2, 2, 1, 1, 1]);
+	// R calls g before it needs its argument: the body of h starts at the call, h() calls it, and the
+	// call goes on into its argument (flowR puts the argument first)
+	const label = new Map([...text.matchAll(/\\mrGraphNode\[[^\]]*\]\{(\w+)\}\{[^}]*\}\{[^}]*\}\{\w+\}\{([^}]*)\}/g)].map(x => [x[1], x[2]]));
+	const edges = text.split('\\mrGraphPath').slice(1).map(e => {
+		const ids = [...e.matchAll(/mr-(\w+)\./g)].map(x => label.get(x[1]));
+		return `${e.match(/^\{(\w+)\}/)[1]}: ${ids[0]} -> ${ids.at(-1)}`;
+	});
+	// g forces its argument where it uses a: the return in the promise leaves g and h from there
+	for(const e of ['body: h <- function() -> g(return("h early"))', 'calls: h() -> g(return("h early"))',
+		'forces: a -> return("h early")', 'returns: return("h early") -> end of h']) {
+		assert.ok(edges.includes(e), `${e} in ${edges.join('; ')}`);
+	}
+	assert.doesNotMatch(text, /#/);
+	assert.equal(m.withoutComment('x <- "a # b" # c'), 'x <- "a # b"');
+});
+
+test('the shipped pages: a name links to the page of its topic, not one named after it', () => {
+	// flowR names a page after the function (rdrr.io/r/base/return.html, which does not exist)
+	assert.equal(m.shippedPages().get('base::return'), 'https://stat.ethz.ch/R-manual/R-devel/library/base/html/function.html');
+	assert.equal(m.shippedPages(path.join(os.tmpdir(), 'no-such-database.cfg')).size, 0);
+});
+
+test('a use links to what flowR defines it with, also under another name (assign)', () => {
+	// f <- function() assign(var_name, 42); print(x): flowR places the definition of x at var_name
+	const source = ['f <- function() {', '  assign(var_name, 42)', '}', 'print(x)'];
+	const answer = {
+		dataflow: { graph: {
+			vertexInformation: [[1, { tag: 'vdef' }], [2, { tag: 'use' }], [3, { tag: 'fcall', name: 'print' }]],
+			edgeInformation: [[2, [[1, { types: 1 }]]], [3, [[2, { types: 64 }]]]]
+		} },
+		'location-map': { map: { ids: { 1: [0, [2, 10, 2, 17]], 2: [0, [4, 7, 4, 7]], 3: [0, [4, 1, 4, 5]] } } }
+	};
+	assert.deepEqual(m.flowFacts({ answer, at: l => ['5', l], source: l => source[l - 1] }).filter(f => f.includes('5@4@7')),
+		['\\mrFlowRef{5@4@7}{var}{5@2@10}']);
+});
+
+test('the side files of older versions go, unless --no-cleanup', async t => {
+	// no network: the web backend fails, the document command still writes a status and cleans up
+	t.mock.method(globalThis, 'fetch', async() => {
+		throw new Error('offline');
+	});
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'magic-r-clean-'));
+	try {
+		const keep = ['doc.mr.R', 'doc.mr-play.R', 'doc.mr-slice.R', 'other.mr-play-1.R', 'doc.mr-play-x.R'];
+		const old = ['doc.mr-play-1.R', 'doc.mr-play-12.R', 'doc.mr-slice-3.R'];
+		[...keep, ...old].forEach(f => fs.writeFileSync(path.join(dir, f), ''));
+		assert.deepEqual(m.staleSideFiles(path.join(dir, 'doc.mr.R')).map(f => path.basename(f)).sort(), [...old].sort());
+		assert.deepEqual(m.staleSideFiles(path.join(dir, 'doc.R')), []);
+		assert.equal(m.parseArgs(['--no-cleanup']).opts.cleanup, false);
+		const run = cleanup => m.documentCommand({ backend: 'web', noCache: true, ...cleanup }, [path.join(dir, 'doc.mr.R'), path.join(dir, 'doc.mr.cfg')]);
+		await run({ cleanup: false });
+		assert.ok(old.every(f => fs.existsSync(path.join(dir, f))));
+		await run({});
+		assert.deepEqual(old.filter(f => fs.existsSync(path.join(dir, f))), []);
+		assert.ok(keep.every(f => fs.existsSync(path.join(dir, f))));
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('arrows that share a name spread over it, in the order of their sides', () => {
+	const lines = ['square <- 1', 'a_long_name_in_the_way <- 2', 'x <- square + square'];
+	// two uses of line 3 read square of line 1, along two lanes: the outer lane enters further left
+	const placed = m.arrowTracks([{ lu: 3, cu: 15, nu: 6, ld: 1, cd: 1, nd: 6 }, { lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6 }], lines);
+	assert.deepEqual(placed.map(a => [a.lane, a.ei, a.en]), [[1, 1, 2], [0, 2, 2]]);
+	assert.ok(placed.every(a => a.lane >= 0 && a.rc === 27));
+	// a call runs right of the code, so it enters after an arrow from the left lane
+	const mixed = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6, call: true }, { lu: 3, cu: 15, nu: 6, ld: 1, cd: 1, nd: 6 }], lines);
+	assert.deepEqual(mixed.map(a => [a.lane >= m.RIGHT, a.ei]), [[true, 2], [false, 1]]);
+});
+
+test('the script runs when called through a symlink (a linked TEXMF tree or checkout)', async() => {
+	const { spawnSync } = await import('node:child_process');
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'magic-r-link-'));
+	try {
+		const real = path.resolve(here, '..', '..');
+		fs.symlinkSync(real, path.join(dir, 'linked-dir'), 'dir');
+		fs.symlinkSync(path.join(real, 'magic-r-flowr.mjs'), path.join(dir, 'linked.mjs'));
+		for(const script of [path.join(dir, 'linked-dir', 'magic-r-flowr.mjs'), path.join(dir, 'linked.mjs')]) {
+			const res = spawnSync(process.execPath, [script, '--help'], { encoding: 'utf8' });
+			assert.equal(res.status, 0);
+			assert.match(res.stdout, /magic-r-flowr\.mjs document/);
+		}
+		assert.equal(m.isMain(path.join(dir, 'linked.mjs'), new URL(`file://${path.join(real, 'magic-r-flowr.mjs')}`).href), true);
+		assert.equal(m.isMain(path.join(real, 'README.md')), false);
+		assert.equal(m.isMain(undefined), false);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('a use never links to a definition of a later listing, even of its name', () => {
+	// listing 5: f defines x through assign, print(x) reads it; listing 6: x <- 2 (flowR reads it too)
+	const source = ['f <- function() {', '  assign(var_name, 42)', '}', 'print(x)', 'x <- 2'];
+	const answer = {
+		dataflow: { graph: {
+			vertexInformation: [[1, { tag: 'vdef' }], [2, { tag: 'use' }], [4, { tag: 'vdef' }]],
+			edgeInformation: [[2, [[4, { types: 1 }], [1, { types: 1 }]]]]
+		} },
+		'location-map': { map: { ids: { 1: [0, [2, 10, 2, 17]], 2: [0, [4, 7, 4, 7]], 4: [0, [5, 1, 5, 1]] } } }
+	};
+	const at = l => l === 5 ? ['6', 1] : ['5', l];
+	const facts = m.flowFacts({ answer, at, source: l => source[l - 1] });
+	assert.deepEqual(facts.filter(f => f.includes('{5@4@7}')), ['\\mrFlowRef{5@4@7}{var}{5@2@10}']);
+});
+
+test('graphs with the key lines: the line of the code in each node', () => {
+	const plain = m.dataflowGraph('df', flowAnswer, flowSource);
+	const lined = m.dataflowGraph('df', flowAnswer, flowSource, { lines: true });
+	assert.doesNotMatch(plain, /mrGraphLine/);
+	// p <- "a" is in line 2, f(p) in line 4
+	assert.match(lined, /\{p\\mrGraphId\{4\}\\mrGraphLine\{2\}\}/);
+	assert.match(lined, /\\mrGraphLine\{4\}/);
+	const answer = JSON.parse(fs.readFileSync(path.join(here, 'control-flow-calls.json'), 'utf8'));
+	const lines = ['g <- function(a) {', '  a', '  "g end"', '}', 'h <- function() {', '  g(return("h early"))', '  "h end"', '}', 'h()'];
+	const cf = m.controlFlowGraph('cf', answer, lines, { lines: true });
+	assert.match(cf, /\{h\(\)\\mrGraphLine\{9\}\}/);
+	assert.match(cf, /\{end of h\}/);
+});
+
+test('names that are no functions (data sets) are marked, so they are styled as variables', () => {
+	const text = m.packageEntry('tidyr', '1.3', [{ name: 'pivot_longer', topic: 'pivot_longer' }, { name: 'relig_income', topic: 'relig_income' }], [], ['relig_income', 'gone']);
+	assert.match(text, /\\D\{relig_income,\}%/);
+	assert.doesNotMatch(m.packageEntry('tidyr', '1.3', [{ name: 'pivot_longer', topic: 'pivot_longer' }]), /\\D/);
+});
+
+test('arrows into one name from one side do not cross below it', () => {
+	const lines = ['square <- 1', 'a_long_name_in_the_way <- 2', 'x <- square(3) + square(4)'];
+	// two calls from the right lane into square: the one entering further right runs closer to line 1
+	const calls = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6, call: true }, { lu: 3, cu: 17, nu: 6, ld: 1, cd: 1, nd: 6, call: true }], lines);
+	const [right, left] = [...calls].sort((x, y) => y.ei - x.ei);
+	assert.ok(right.dt < left.dt);
+	// two from the left lane: the one entering further left runs closer
+	const data = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6 }, { lu: 3, cu: 17, nu: 6, ld: 1, cd: 1, nd: 6 }], lines);
+	const [l1, l2] = [...data].sort((x, y) => x.ei - y.ei);
+	assert.ok(l1.dt < l2.dt);
+});
+
+test('every kind of node and edge of the graphs has a TikZ style and a name in the legend of magic-r.sty', () => {
+	// a kind without a style is a pgfkeys error ('I do not know the key /tikz/mr unreach') in the document
+	const sty = fs.readFileSync(path.join(here, '..', '..', 'magic-r.sty'), 'utf8')
+		.split('\n').map(l => l.replace(/(^|[^\\])%.*$/, '$1')).join('\n');
+	const styles = new Set([...sty.matchAll(/mr ([\w-]+)\/\.style=/g)].map(x => x[1]));
+	const listed = new Set([...sty.matchAll(/\\def\\mr@gl(?:kinds|edges)\{([^}]*)\}/g)].flatMap(x => x[1].split(',')));
+	const names = new Set([...sty.matchAll(/\\def\\mr@glname@(\w+)\{/g)].map(x => x[1]));
+	for(const kind of Object.keys(m.LEGEND_NAMES)) {
+		assert.ok(styles.has(kind), `no TikZ style 'mr ${kind}'`);
+		assert.ok(listed.has(kind), `'${kind}' is not in \\mr@glkinds or \\mr@gledges`);
+		assert.ok(names.has(kind), `no legend name \\mr@glname@${kind}`);
+	}
+});
+
+test('a session of flowR\'s REPL: each input with what flowR prints for it', () => {
+	const calls = [];
+	// what flowR prints: the message of each separator, then the answer of the input after it
+	const repl = { raw: (cmds, dir, rcode) => {
+		calls.push({ cmds, rcode });
+		return ['the command \'mrstep0\' is unknown, try :help for more information', '', '\x1b[1mflowchart\x1b[0m TD',
+			'    n0(["x"])', 'Copied mermaid url to clipboard (dataflow: 1ms).',
+			'the command \'mrstep1\' is unknown, try :help for more information', 'You are not allowed to execute arbitrary R code. ', ''].join('\n');
+	} };
+	const texts = m.sessionTexts(repl, [{ kind: 'session', name: 'fsession-1', inputs: [':dataflow x', 'x + 1', ''] }], '/tmp');
+	assert.deepEqual(calls, [{ cmds: [':mrstep0', ':dataflow x', ':mrstep1', ':execute x + 1'], rcode: false }]);
+	const hex = s => Buffer.from(s, 'utf8').toString('hex');
+	assert.deepEqual(texts, ['\\mrFlowrSession{fsession-1}{2}',
+		`\\mrFlowrSessionLine{fsession-1}{1}{${hex('flowchart TD')}}`, `\\mrFlowrSessionLine{fsession-1}{1}{${hex('    n0(["x"])')}}`,
+		`\\mrFlowrSessionLine{fsession-1}{2}{${hex('You are not allowed to execute arbitrary R code.')}}`]);
+	// a flowR that cannot run is a status, not an error
+	assert.match(m.sessionTexts({ raw: () => { throw new Error('no flowR'); } }, [{ kind: 'session', name: 's', inputs: [':version'] }], '/tmp')[0],
+		/^\\mrFlowrSessionFailed\{s\}\{no flowR\}$/);
+});
+
+test('the output of a session is ASCII, which listings reads', () => {
+	assert.equal(m.ascii('   ╰ Unused (≈3 ms) → x ü'), '   + Unused (~3 ms) -> x ?');
 });

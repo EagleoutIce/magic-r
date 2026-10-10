@@ -11,6 +11,7 @@
 //   dataflow graph, it adds where each name is defined, the lines that read or write files,
 //   and the answers of the requests of the document ('## magic-r request {...}': graphs,
 //   slices, queries). The file always exists afterwards and starts with \mrFlowrStatus{...}.
+//   Unless --no-cleanup, it removes the side files of older versions ('<job>.mr-play-<n>.R').
 // generate: the shipped link database, for the packages of a list (one name per line).
 //   It requests every page and handles the ones that fail as verify --prune does.
 // verify: requests every documentation page of a database and reports the ones that fail;
@@ -61,7 +62,7 @@ export function texMessage(s) {
 }
 /** the width of the lines of a database, long lines read faster and keep the file short */
 export const LINE_WIDTH = 240;
-const CACHE_FORMAT = 'f3';
+const CACHE_FORMAT = 'f4';
 function wrap(names) {
 	const lines = [];
 	let line = '';
@@ -85,11 +86,34 @@ function entryText(head, names) {
 const byKey = ([a], [b]) => a < b ? -1 : a > b ? 1 : 0;
 
 /**
- * The database entry of a package: \N lists the names documented under their own name, \T{topic}
- * the ones of another topic, \U{url} the ones of any other page.
- * @param {{name: string, docUrl?: string, topic?: string}[]} fns
+ * The S3 generics of a package: those R knows (`generics`, from an installed package), else the
+ * functions with at least two methods ('tidy' of 'tidy.lm' and 'tidy.glm') among its names.
  */
-export function packageEntry(pkg, version, fns) {
+export function s3Generics(fns, generics) {
+	if(generics) {
+		return [...new Set(generics)].filter(linkable);
+	}
+	const names = new Set(fns.map(f => f.name)), methods = new Map();
+	for(const n of names) {
+		for(let i = n.indexOf('.', 1); i > 0; i = n.indexOf('.', i + 1)) {
+			const g = n.slice(0, i);
+			if(names.has(g) && i < n.length - 1) {
+				methods.set(g, (methods.get(g) ?? 0) + 1);
+			}
+		}
+	}
+	return [...methods].filter(([g, k]) => k >= 2 && linkable(g)).map(([g]) => g);
+}
+
+/**
+ * The database entry of a package: \N lists the names documented under their own name, \T{topic}
+ * the ones of another topic, \U{url} the ones of any other page, \S the S3 generics, whose methods
+ * ('print.foo') link to them, \D the names that are no functions (data sets).
+ * @param {{name: string, docUrl?: string, topic?: string}[]} fns
+ * @param {string[]} [generics] the S3 generics R knows, else they are guessed from the names
+ * @param {string[]} [data] the names that are no functions (data sets, constants): \D, plain as variables
+ */
+export function packageEntry(pkg, version, fns, generics, data = []) {
 	const scheme = BASE_PACKAGES.includes(pkg) ? 'rman' : 'cran';
 	const topics = new Map(), urls = new Map(), same = [], seen = new Set();
 	const add = (m, k, n) => m.set(k, [...m.get(k) ?? [], n]);
@@ -128,6 +152,15 @@ export function packageEntry(pkg, version, fns) {
 	}
 	for(const [url, names] of [...urls].sort(byKey)) {
 		out.push(entryText(`\\U{${tex(url)}}`, names));
+	}
+	// only generics that link themselves
+	const s3 = s3Generics(fns, generics).filter(g => seen.has(g));
+	if(s3.length) {
+		out.push(entryText('\\S', s3));
+	}
+	const values = [...new Set(data)].filter(n => seen.has(n));
+	if(values.length) {
+		out.push(entryText('\\D', values));
 	}
 	out.push('}');
 	return out.join('\n');
@@ -202,17 +235,27 @@ export function npmFlowr(env = process.env, execPath = process.execPath) {
 	return undefined;
 }
 
-export function run(argv, { cwd, timeout, input } = {}) {
+export function run(argv, { cwd, timeout, input, merged } = {}) {
 	// a .js file runs with this node, so a flowR checkout works without a wrapper
 	const [cmd, ...args] = /\.[cm]?js$/.test(argv[0]) ? [process.execPath, ...argv] : argv;
-	const res = spawnSync(cmd, args, {
-		cwd, input, encoding: 'utf8', timeout: (timeout ?? 120) * 1000, maxBuffer: 1 << 30, windowsHide: true,
-		shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd)
-	});
-	if(res.error) {
-		throw new Error(`cannot run ${argv[0]}: ${res.error.code === 'ETIMEDOUT' ? 'timeout' : res.error.message}`);
+	// merged: stdout and stderr in one file, in the order the program wrote them
+	const file = merged && path.join(cwd ?? os.tmpdir(), `merged-${process.pid}.out`);
+	const fd = file && fs.openSync(file, 'w');
+	try {
+		const res = spawnSync(cmd, args, {
+			cwd, input, encoding: 'utf8', timeout: (timeout ?? 120) * 1000, maxBuffer: 1 << 30, windowsHide: true,
+			shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd), ...fd ? { stdio: ['ignore', fd, fd] } : {}
+		});
+		if(res.error) {
+			throw new Error(`cannot run ${argv[0]}: ${res.error.code === 'ETIMEDOUT' ? 'timeout' : res.error.message}`);
+		}
+		return fd ? { ...res, stdout: fs.readFileSync(file, 'utf8'), stderr: '' } : res;
+	} finally {
+		if(fd) {
+			fs.closeSync(fd);
+			fs.rmSync(file, { force: true });
+		}
 	}
-	return res;
 }
 
 /** the JSON answers in an output, one per command; an error message counts as a failed command */
@@ -299,6 +342,16 @@ export class Repl {
 	}
 	command(cmds, dir) {
 		return [...this.prefix(dir), ...this.engine, '--no-ansi', '-e', cmds.join(';')];
+	}
+	/** what flowR's REPL prints for the commands, as text; rcode: it may run R (the r-shell engine) */
+	raw(cmds, dir, rcode = false) {
+		const engine = rcode ? ['--default-engine', 'r-shell', '--r-session-access'] : this.engine;
+		// flowR writes its messages ('the command ... is unknown') to stderr, the answers to stdout
+		const res = run([...this.prefix(dir), ...engine, '--no-ansi', '-e', cmds.join(';')], { cwd: dir, timeout: this.timeout, merged: true });
+		if(res.status !== 0 && !res.stdout) {
+			throw new Error(`${this.name}: ${texMessage((res.stderr || '').split('\n').find(l => l.trim()) ?? `exit code ${res.status}`)}`);
+		}
+		return res.stdout ?? '';
 	}
 	describe() {
 		return `${this.name} flowR ${this.version()}`;
@@ -504,10 +557,18 @@ export function flowFacts({ answer, at, source }) {
 			set(n, at => at === here ? `\\mrFlowDef{${at}}{${g.kind(id)}}` : `\\mrFlowRef{${at}}{${g.kind(id)}}{${here}}`);
 		} else if(v.tag === 'use' || v.tag === 'fcall' && typeof v.name === 'string' && v.name === n.text) {
 			// the definition read last before the use, else the first one
-			const defs = g.out(id).filter(([t, types]) => types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef')
-				// only a definition of the same name: flowR places some reads at a call ('c' of mget(c("x")))
-				.map(([t]) => ({ t, n: name(t) })).filter(d => d.n && d.n.text === n.text && place(d.n.line, d.n.col));
-			const def = defs.filter(d => before(d.n, n)).sort((a, b) => before(a.n, b.n) ? 1 : -1)[0] ?? defs[0];
+			const read = g.out(id).filter(([t, types]) => types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef')
+				.map(([t]) => ({ t, n: name(t) })).filter(d => d.n && place(d.n.line, d.n.col));
+			// a definition of the same name: flowR places some reads at a call ('c' of mget(c("x"))). A
+			// variable defined under another name ('var_name' of assign(var_name, 42)) counts for a use
+			// when it has none, as for the arrows
+			const same = read.filter(d => d.n.text === n.text);
+			// the last definition before the use, else one after it in the same listing (a function reads
+			// what comes after it), never one of a later listing; of the same name first
+			const listing = d => at(d.n.line)?.[0];
+			const pick = defs => defs.filter(d => before(d.n, n)).sort((a, b) => before(a.n, b.n) ? 1 : -1)[0]
+				?? defs.filter(d => listing(d) === at(n.line)?.[0])[0];
+			const def = pick(same) ?? (v.tag === 'use' ? pick(read) : undefined);
 			if(def) {
 				const kind = v.tag === 'fcall' ? 'fun' : g.kind(def.t);
 				set(n, at => `\\mrFlowRef{${at}}{${kind}}{${place(def.n.line, def.n.col)}}`);
@@ -662,7 +723,8 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 	// stadiums and hexagons need room for their round and pointed ends
 	const width = n => n.point ? 0.1 : ({ use: 0.1, value: 0.2, fcall: 0.08, entry: 0.2, exit: 0.2, branch: 0.25, cgmain: 0.2, cgbuiltin: 0.1 }[n.kind] ?? 0)
 		+ Math.max(0.45, Math.max(...n.label.map(l => l.length)) * char + 0.26
-		+ (n.note === undefined ? 0 : String(n.note).length * 0.09 + 0.08), (n.builtin ?? '').length * 0.09 + 0.3);
+		+ (n.note === undefined ? 0 : String(n.note).length * 0.09 + 0.08) + (n.line === undefined ? 0 : String(n.line).length * 0.09 + 0.22),
+		(n.builtin ?? '').length * 0.09 + 0.3);
 	const height = n => n.point ? 0 : n.label.length * 0.34 + 0.2 + (n.builtin ? 0.24 : 0);
 	// the order: sweeps down and up, each sorts a layer by the mean place of its neighbors in the other ones
 	const rank = new Map();
@@ -773,9 +835,17 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 }
 const round = v => Math.round(v * 100) / 100;
 const num = v => round(v).toString();
+/** with the key lines: the line of the code of each node (its position: line * 1000 + column), not of
+ * the ends, of R's functions, or of the top level */
+function withLines(nodes, opts) {
+	if(opts.lines) {
+		nodes.filter(n => n.kind !== 'exit' && n.pos >= 1000 && n.pos < 1e9).forEach(n => n.line = Math.floor(n.pos / 1000));
+	}
+	return nodes;
+}
 export function graphText(name, nodes, edges) {
 	const ns = nodes.map(n => `\\mrGraphNode${n.w ? `[${num(n.w)}]` : ''}{${n.id}}{${num(n.x)}}{${num(n.y)}}{${n.kind}}{${n.label.map(l => texText(l)).join('\\\\')}${
-		n.note === undefined ? '' : `\\mrGraphId{${texText(n.note)}}`}${n.builtin ? `\\mrGraphBuiltin{${texText(n.builtin)}}` : ''}}`);
+		n.note === undefined ? '' : `\\mrGraphId{${texText(n.note)}}`}${n.line === undefined ? '' : `\\mrGraphLine{${n.line}}`}${n.builtin ? `\\mrGraphBuiltin{${texText(n.builtin)}}` : ''}}`);
 	const at = new Map(nodes.map(n => [n.id, n]));
 	// the rows of the layers: their middle and height
 	const rows = new Map();
@@ -929,9 +999,9 @@ export function graphText(name, nodes, edges) {
 	return `\\mrFlowrGraph{${name}}{${ns.join('')}${frames.join('')}${legendText(nodes, edges, lines)}}{${es.join('')}}`;
 }
 
-const LEGEND_NAMES = { cgmain: 'top level', cgfun: 'function', cgbuiltin: 'of R', vdef: 'definition', fdef: 'function', use: 'use', value: 'value', fcall: 'call', entry: 'entry',
+export const LEGEND_NAMES = { cgmain: 'top level', cgfun: 'function', cgbuiltin: 'R fn', vdef: 'definition', fdef: 'function', use: 'use', value: 'value', fcall: 'call', entry: 'entry',
 	block: 'block', branch: 'condition', exit: 'exit', reads: 'reads', definedBy: 'defined by', calls: 'calls',
-	returns: 'returns', argument: 'argument', flow: 'flow', cond: 'branch (T, F)', back: 'loop' };
+	returns: 'returns', argument: 'argument', flow: 'flow', cond: 'branch (T, F)', back: 'loop', body: 'body', dead: 'unreachable', unreach: 'after a return', cgcall: 'calls', forces: 'forces' };
 /**
  * Where the legend of a graph goes: \mrGraphLegendAt{x}{y} (its top left corner, cm) in a corner of the
  * graph that no node or edge crosses, else below the graph (no position). Its size is estimated from
@@ -998,7 +1068,7 @@ export function dataflowGraph(name, answer, lines, opts = {}) {
 			}
 		}
 	}
-	const placed = layout(nodes, edges, opts);
+	const placed = layout(withLines(nodes, opts), edges, opts);
 	placed.files = opts.files?.map(f => f.name);
 	return graphText(name, placed, edges);
 }
@@ -1056,7 +1126,7 @@ export function callGraph(name, answer, lines, opts = {}) {
 		const to = targets.length ? targets.map(t => `f${t}`) : [node(b, 'cgbuiltin', String(v.name), 1e9)];
 		for(const t of to) {
 			if(!edges.some(e => e.from === caller && e.to === t)) {
-				edges.push({ from: caller, to: t, kind: 'calls' });
+				edges.push({ from: caller, to: t, kind: 'cgcall' });
 			}
 		}
 	};
@@ -1083,55 +1153,338 @@ export function callGraph(name, answer, lines, opts = {}) {
 	}
 	// a function that calls itself gets room for the loop at its right
 	shown.forEach(n => n.loop = shownEdges.some(e => e.from === n.id && e.to === n.id));
-	return graphText(name, layout(shown, shownEdges, { ...opts, up: true }), shownEdges);
+	return graphText(name, layout(withLines(shown, opts), shownEdges, { ...opts, up: true }), shownEdges);
 }
 
-/** the control flow graph of an answer in basic blocks, each labeled with its code */
+/** a line of R without its comment ('#' outside of strings) */
+export function withoutComment(line) {
+	let quote = null;
+	for(let i = 0; i < line.length; i++) {
+		const c = line[i];
+		if(quote) {
+			if(c === '\\') {
+				i++;
+			} else if(c === quote) {
+				quote = null;
+			}
+		} else if(c === '"' || c === '\'' || c === '`') {
+			quote = c;
+		} else if(c === '#') {
+			return line.slice(0, i).trimEnd();
+		}
+	}
+	return line;
+}
+
+/** the arguments of a call (the text between its parentheses), split at its commas of the top level */
+function splitArgs(text) {
+	const out = [];
+	let depth = 0, quote = null, cur = '';
+	for(let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if(quote) {
+			if(c === '\\') {
+				cur += c + (text[++i] ?? '');
+				continue;
+			}
+			if(c === quote) {
+				quote = null;
+			}
+		} else if(c === '"' || c === '\'') {
+			quote = c;
+		} else if('([{'.includes(c)) {
+			depth++;
+		} else if(')]}'.includes(c)) {
+			depth--;
+		} else if(c === ',' && depth === 0) {
+			out.push(cur);
+			cur = '';
+			continue;
+		}
+		cur += c;
+	}
+	return cur.trim() || out.length ? [...out, cur] : out;
+}
+
+/** the column (1-based) of the parenthesis that closes the one at column `col`, else undefined */
+function closing(line, col) {
+	let depth = 0, quote = null;
+	for(let i = col - 1; i < line.length; i++) {
+		const c = line[i];
+		if(quote) {
+			if(c === '\\') {
+				i++;
+			} else if(c === quote) {
+				quote = null;
+			}
+		} else if(c === '"' || c === '\'') {
+			quote = c;
+		} else if(c === '(') {
+			depth++;
+		} else if(c === ')' && --depth === 0) {
+			return i + 1;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The control flow graph of an answer in basic blocks, each labeled with its code. flowR gives the
+ * body of a function a graph of its own; a block with a call gets an edge to the body of the function
+ * it calls (flowR names the definition a call targets, and the definition its body).
+ */
 export function controlFlowGraph(name, answer, lines, opts = {}) {
 	const cf = answer?.['control-flow']?.controlFlow, ids = answer?.['location-map']?.map?.ids ?? {};
 	if(!cf?.graph) {
 		return undefined;
 	}
 	const entry = new Set((cf.entryPoints ?? []).map(String)), exit = new Set((cf.exitPoints ?? []).map(String));
-	const nodes = [];
+	// the block of an element, the body of a function definition, the definitions a call targets
+	const blockOf = new Map((cf.graph.bbChildren ?? []).map(([e, b]) => [String(e), String(b)]));
+	const bodyOf = new Map(), callsOf = new Map(), callsAt = new Map(), callName = new Map(), edges = [];
+	for(const [id, info] of cf.graph.vtxInfos) {
+		for(const e of Array.isArray(info[2]) ? info[2] : []) {
+			if(Array.isArray(e[2]) && e[2].length) {
+				bodyOf.set(String(e[1]), String(e[2][0]));
+			}
+			if(Array.isArray(e[3]) && e[3].length) {
+				callsOf.set(String(id), [...callsOf.get(String(id)) ?? [], ...e[3].map(String)]);
+				callsAt.set(String(e[1]), e[3].map(String));
+			}
+			// the name of an element: the code at its place ('return')
+			const l = ids[String(e[1])]?.[1];
+			if(Array.isArray(l) && l[0] === l[2]) {
+				callName.set(String(e[1]), (lines[l[0] - 1] ?? '').slice(l[1] - 1, l[3]));
+			}
+		}
+	}
+	// the parameters of a function stand in its first line, between the parentheses after 'function'
+	const params = [];
+	for(const f of bodyOf.keys()) {
+		const l = ids[f]?.[1], line = Array.isArray(l) ? lines[l[0] - 1] ?? '' : '';
+		const open = Array.isArray(l) ? line.indexOf('(', l[3]) + 1 : 0, close = open ? closing(line, open) : undefined;
+		if(close) {
+			params.push([l[0], open, close]);
+		}
+	}
+	const isParam = l => params.some(([row, from, to]) => l[0] === row && l[2] === row && l[1] > from && l[3] < to);
+	// the statements of a block, one node each (a line, or the part of a line a block spans): the
+	// first one takes the edges into the block, the last one those out of it
+	const nodes = [], first = new Map(), last = new Map(), nodeOfElem = new Map(), rowsOf = new Map(), rowNode = new Map();
+	// the node of an element: its own, else the one of its line in its block ('function' is no code there)
+	const nodeOf = e => nodeOfElem.get(e) ?? rowNode.get(`${blockOf.get(e)}:${ids[e]?.[1]?.[0]}`);
+	// a line without its comment, a definition without the brace that opens its body
+	const text = r => withoutComment(lines[r - 1] ?? '').trim().replace(/\s*\{$/, '');
+	const sliceOf = (row, locs) => {
+		const c1 = Math.min(...locs.map(l => l[1])), line = lines[row - 1] ?? '';
+		let c2 = Math.max(...locs.map(l => l[3]));
+		// a call is located at its name, so its arguments and closing parentheses come along
+		if(line[c2] === '(') {
+			c2 = closing(line, c2 + 1) ?? c2;
+		}
+		const open = t => (t.match(/\(/g) ?? []).length - (t.match(/\)/g) ?? []).length;
+		while(open(line.slice(c1 - 1, c2)) > 0 && line[c2] === ')') {
+			c2++;
+		}
+		return { text: withoutComment(line.slice(c1 - 1, c2)).trim().replace(/\s*\{$/, ''), c1, c2 };
+	};
 	for(const [id, info] of cf.graph.vtxInfos) {
 		// markers ('12-exit') stand where their compound starts, they are no code of the block
 		const elems = (Array.isArray(info[2]) ? info[2].map(e => String(e[1])) : [String(id)]).filter(e => !/-exit$/.test(e));
-		let locs = elems.map(e => ids[e]?.[1]).filter(Array.isArray);
+		const located = elems.map(e => [e, ids[e]?.[1]]).filter(([, l]) => Array.isArray(l));
+		// the parameters belong to the definition, not to the code of the body
+		let code = located.filter(([, l]) => !isParam(l));
+		code = code.length ? code : located;
 		// a loop or condition stands for its end in the block after it: its keyword is no code there
-		const code = locs.filter(l => !/^(for|while|repeat|if|function)$/.test(lines[l[0] - 1]?.slice(l[1] - 1, l[3]) ?? ''));
-		locs = code.length ? code : locs;
-		if(!locs.length) {
+		const words = code.filter(([, l]) => !/^(for|while|repeat|if|function)$/.test(lines[l[0] - 1]?.slice(l[1] - 1, l[3]) ?? ''));
+		code = words.length ? words : code;
+		if(!code.length) {
 			continue;
 		}
 		// the lines of its elements, compound ones ('for', 'if') only if there is nothing else
-		const single = locs.filter(l => l[0] === l[2]);
-		const rows = [...new Set((single.length ? single : locs).map(l => l[0]))].sort((x, y) => x - y);
-		const from = rows[0];
-		let label = rows.map(r => lines[r - 1]?.trim() ?? '').filter(Boolean);
-		if(rows.length === 1 && locs.every(l => l[0] === l[2])) {
-			// a block within one line: what it spans there
-			const c1 = Math.min(...locs.map(l => l[1])), line = lines[from - 1] ?? '';
-			let c2 = Math.max(...locs.map(l => l[3]));
-			// a call is located at its name, so the closing parentheses come along
-			const open = t => (t.match(/\(/g) ?? []).length - (t.match(/\)/g) ?? []).length;
-			while(open(line.slice(c1 - 1, c2)) > 0 && line[c2] === ')') {
-				c2++;
+		const single = code.filter(([, l]) => l[0] === l[2]);
+		const rows = [...new Set((single.length ? single : code).map(([, l]) => l[0]))].sort((x, y) => x - y);
+		rowsOf.set(String(id), rows);
+		const raw = String(id), base = `b${raw.replace(/[^\w]/g, '')}`;
+		rows.forEach((row, k) => {
+			const here = code.filter(([, l]) => l[0] === row);
+			const all = here.length && here.every(([, l]) => l[0] === l[2]);
+			const nid = k === 0 ? base : `${base}s${k}`;
+			const cut = rows.length === 1 && all ? sliceOf(row, here.map(([, l]) => l)) : undefined;
+			nodes.push({ id: nid, raw, kind: k === 0 && entry.has(raw) ? 'entry' : 'block', row, ...cut ? { c1: cut.c1, c2: cut.c2 } : {},
+				label: [shorten(cut ? cut.text : text(row), 32)],
+				pos: row * 1000 + Math.min(...(here.length ? here : code).map(([, l]) => l[1])) });
+			here.forEach(([e]) => nodeOfElem.set(e, nid));
+			rowNode.set(`${raw}:${row}`, nid);
+			if(k > 0) {
+				edges.push({ from: k === 1 ? base : `${base}s${k - 1}`, to: nid, kind: 'flow', label: '' });
 			}
-			label = [line.slice(c1 - 1, c2).trim()];
-		}
-		if(label.length > 5) {
-			label = [...label.slice(0, 4), '…'];
-		}
-		nodes.push({ id: `b${String(id).replace(/[^\w]/g, '')}`, raw: String(id), kind: entry.has(String(id)) ? 'entry' : exit.has(String(id)) ? 'exit' : 'block',
-			label: label.map(l => shorten(l, 32)), pos: from * 1000 + Math.min(...locs.map(l => l[1])) });
+		});
+		first.set(raw, base);
+		last.set(raw, rows.length > 1 ? `${base}s${rows.length - 1}` : base);
 	}
-	const byRaw = new Map(nodes.map(n => [n.raw, n.id])), edges = [];
+	const byRaw = first;
 	for(const [from, es] of cf.graph.edgeInfos) {
 		for(const [to, e] of es) {
-			if(byRaw.has(String(from)) && byRaw.has(String(to))) {
-				edges.push({ from: byRaw.get(String(from)), to: byRaw.get(String(to)), kind: e?.when === undefined ? 'flow' : 'cond',
+			if(last.has(String(from)) && first.has(String(to))) {
+				edges.push({ from: last.get(String(from)), to: first.get(String(to)), kind: e?.when === undefined ? 'flow' : 'cond',
 					label: e?.when === undefined ? '' : e.when ? 'T' : 'F' });
+			}
+		}
+	}
+	const bodyBlock = f => {
+		const body = bodyOf.get(f);
+		return body && (blockOf.get(body) ?? body);
+	};
+	// a call leads to the body of the function it calls, a definition to the body it defines
+	for(const [block, targets] of callsOf) {
+		for(const f of targets) {
+			const to = byRaw.get(bodyBlock(f)), from = [...nodeOfElem].find(([e]) => blockOf.get(e) === block && (callsAt.get(e) ?? []).includes(f))?.[1] ?? last.get(block);
+			if(to && from && !edges.some(e => e.from === from && e.to === to && e.kind === 'calls')) {
+				edges.push({ from, to, kind: 'calls', label: '' });
+			}
+		}
+	}
+	for(const f of bodyOf.keys()) {
+		const from = nodeOf(f), to = byRaw.get(bodyBlock(f));
+		if(from && to) {
+			edges.push({ from, to, kind: 'body', label: '' });
+		}
+	}
+	// the blocks of a function: those its body reaches, and the others within its lines (flowR leaves
+	// code it deems unreachable without edges); its exit follows the blocks where its body ends, a
+	// return() with an edge of its own
+	const next = new Map();
+	for(const [from, es] of cf.graph.edgeInfos) {
+		next.set(String(from), [...next.get(String(from)) ?? [], ...es.map(([to]) => String(to))]);
+	}
+	const owner = new Map(), spans = [];
+	for(const f of bodyOf.keys()) {
+		const row = ids[f]?.[1]?.[0], root = bodyBlock(f);
+		if(!root || row === undefined || !first.has(root)) {
+			continue;
+		}
+		const todo = [root], seen = new Set();
+		while(todo.length) {
+			const b = todo.pop();
+			if(!seen.has(b) && first.has(b)) {
+				seen.add(b);
+				todo.push(...next.get(b) ?? []);
+			}
+		}
+		// the lines of the definition: up to the next statement of the code around it
+		const outer = blockOf.get(f), after = (rowsOf.get(outer) ?? []).filter(r => r > row);
+		const end = after.length ? Math.min(...after) - 1 : lines.length;
+		spans.push({ f, row, end, seen });
+	}
+	spans.sort((x, y) => (x.end - x.row) - (y.end - y.row));
+	for(const raw of first.keys()) {
+		const rows = rowsOf.get(raw) ?? [];
+		const span = spans.find(sp => sp.seen.has(raw)) ?? spans.find(sp => rows.length && rows.every(r => r > sp.row && r <= sp.end));
+		if(span) {
+			owner.set(raw, span);
+		}
+	}
+	const returns = raw => [...nodeOfElem].some(([e]) => blockOf.get(e) === raw && /^return$/.test(String(callName.get(e) ?? '')));
+	const ends = raw => !(next.get(raw) ?? []).some(t => first.has(t));
+	for(const sp of spans) {
+		const name = /^\s*([\w.]+)\s*(<<?-|=)/.exec(lines[sp.row - 1] ?? '')?.[1];
+		const xid = `x${String(sp.f).replace(/[^\w]/g, '')}`;
+		nodes.push({ id: xid, raw: xid, kind: 'exit', label: [name ? `end of ${name}` : 'end'], pos: sp.end * 1000 + 999 });
+		for(const raw of first.keys()) {
+			if(owner.get(raw) === sp && (ends(raw) || returns(raw))) {
+				edges.push({ from: last.get(raw), to: xid, kind: returns(raw) ? 'returns' : 'flow', label: '' });
+			}
+		}
+	}
+	// the end of the code outside of the functions
+	const top = [...first.keys()].filter(raw => !owner.has(raw) && (exit.has(raw) || ends(raw)));
+	if(top.length) {
+		nodes.push({ id: 'xmain', raw: 'xmain', kind: 'exit', label: ['end'], pos: lines.length * 1000 + 999 });
+		top.forEach(raw => edges.push({ from: last.get(raw), to: 'xmain', kind: 'flow', label: '' }));
+	}
+	// the parameters of a function definition (element f): their names, in order
+	const paramsOf = f => {
+		const l = ids[f]?.[1], line = Array.isArray(l) ? lines[l[0] - 1] ?? '' : '';
+		const open = Array.isArray(l) ? line.indexOf('(', l[3]) + 1 : 0, close = open ? closing(line, open) : undefined;
+		return close ? splitArgs(line.slice(open, close - 1)).map(p => p.replace(/=.*$/s, '').trim()) : [];
+	};
+	// the node where the function a call calls first uses the parameter its argument binds
+	const forcingNode = (call, arg) => {
+		const line = lines[call.row - 1] ?? '', open = line.indexOf('(', call.c1 - 1) + 1, close = closing(line, open);
+		if(!open || !close) {
+			return undefined;
+		}
+		// the argument's place among the arguments, or its name ('g(a = return(x))')
+		const args = splitArgs(line.slice(open, close - 1));
+		let at = open, index = -1, named;
+		args.forEach((a, i) => {
+			const from = at, to = at + a.length;
+			if(arg.c1 - 1 >= from && arg.c1 - 1 <= to) {
+				index = i;
+				named = /^\s*([\w.]+)\s*=(?!=)/.exec(a)?.[1];
+			}
+			at = to + 1;
+		});
+		for(const [e, nid] of nodeOfElem) {
+			if(nid !== call.id) {
+				continue;
+			}
+			for(const f of callsAt.get(e) ?? []) {
+				const params = paramsOf(f), param = named ?? params[index];
+				if(!param) {
+					continue;
+				}
+				const use = new RegExp(`(^|[^\\w.])${param.replace(/[.]/g, '\\.')}([^\\w.]|$)`);
+				const sp = spans.find(x => x.f === f);
+				const node = nodes.filter(n => n.row !== undefined && sp && owner.get(n.raw) === sp && n.row > sp.row && use.test(n.label[0]))
+					.sort((a, b) => a.pos - b.pos)[0];
+				if(node) {
+					return node.id;
+				}
+			}
+		}
+		return undefined;
+	};
+	// flowR computes an argument before its call; R calls first, and the argument when the callee
+	// needs it ('g(return(x))'): what leads into the argument leads into the call, which goes on into it
+	const byId = new Map(nodes.map(n => [n.id, n]));
+	for(const arg of nodes) {
+		const call = nodes.find(c => c !== arg && c.row === arg.row && c.c1 !== undefined && arg.c1 !== undefined
+			&& c.c1 < arg.c1 && arg.c2 <= c.c2 && /^[\w.]+\s*\(/.test(c.label[0]));
+		if(!call) {
+			continue;
+		}
+		for(const e of edges) {
+			if(e.to === arg.id && e.from !== call.id) {
+				e.to = call.id;
+			}
+		}
+		// the call ends where its argument ends (returns), not on its own
+		for(let i = edges.length - 1; i >= 0; i--) {
+			if(edges[i].from === call.id && byId.get(edges[i].to)?.kind === 'exit') {
+				edges.splice(i, 1);
+			}
+		}
+		// the callee computes the argument where it first uses its parameter: an edge forces it there
+		const forced = forcingNode(call, arg);
+		edges.push(forced ? { from: forced, to: arg.id, kind: 'forces', label: '' } : { from: call.id, to: arg.id, kind: 'flow', label: '' });
+	}
+	// code of a function that flowR never reaches (after a return), dimmed, after the statement before it
+	const covered = new Set(nodes.filter(n => n.row !== undefined).map(n => n.row));
+	for(const sp of spans) {
+		for(let row = sp.row + 1; row <= sp.end; row++) {
+			const code = text(row);
+			if(covered.has(row) || !code || /^[{}()\s]*$/.test(code)) {
+				continue;
+			}
+			const before = nodes.filter(n => n.row !== undefined && n.row < row && n.row > sp.row && owner.get(n.raw) === sp)
+				.sort((a, b) => b.pos - a.pos)[0];
+			const id = `u${row}`;
+			nodes.push({ id, raw: id, kind: 'dead', label: [shorten(code, 32)], row, pos: row * 1000 });
+			covered.add(row);
+			if(before) {
+				edges.push({ from: before.id, to: id, kind: 'unreach', label: '' });
 			}
 		}
 	}
@@ -1141,7 +1494,7 @@ export function controlFlowGraph(name, answer, lines, opts = {}) {
 			n.kind = 'branch';
 		}
 	}
-	const placed = layout(nodes, edges, { ...opts, up: true });
+	const placed = layout(withLines(nodes, opts), edges, { ...opts, up: true });
 	const at = new Map(placed.map(n => [n.id, n]));
 	// an edge that goes back up (a loop) runs right of every block between its ends, one lane per loop
 	let lane = 0;
@@ -1150,18 +1503,31 @@ export function controlFlowGraph(name, answer, lines, opts = {}) {
 		if(!from || !to || to.layer > from.layer) {
 			return e;
 		}
-		const right = Math.max(...placed.filter(n => n.y <= Math.max(from.y, to.y) + 0.01 && n.y >= Math.min(from.y, to.y) - 0.01)
-			.map(n => n.x + n.w / 2)) + 0.25 + 0.18 * lane++;
-		// it leaves and enters at the right side, or below and above where a block is right of its end
-		const beside = n => placed.some(m => m !== n && Math.abs(m.y - n.y) < 0.01 && m.x > n.x);
-		const below = from.y - from.h / 2 - 0.2, above = to.y + to.h / 2 + 0.2;
+		// beside the blocks between its ends in their column: right of them if no block of another column
+		// is in the way there, else left of them if none is there, else right of all blocks between
+		const between = placed.filter(n => n.y <= Math.max(from.y, to.y) + 0.01 && n.y >= Math.min(from.y, to.y) - 0.01);
+		const lo = Math.min(from.x, to.x) - 0.01, hi = Math.max(from.x, to.x) + 0.01;
+		const column = between.filter(n => n.x >= lo - 1.5 && n.x <= hi);
+		// the points where other edges run beside the blocks, between the ends
+		const others = [...placed.lanes?.values() ?? []].flat()
+			.filter(([, y]) => y <= Math.max(from.y, to.y) + 0.01 && y >= Math.min(from.y, to.y) - 0.01).map(([px]) => px);
+		const free = x => !between.some(n => n.x - n.w / 2 - 0.15 < x && x < n.x + n.w / 2 + 0.15)
+			&& !others.some(px => Math.abs(px - x) < 0.15);
+		const nearRight = Math.max(...column.map(n => n.x + n.w / 2), ...others.filter(px => px > lo)) + 0.25 + 0.18 * lane;
+		const nearLeft = Math.min(...column.map(n => n.x - n.w / 2), ...others.filter(px => px < hi)) - 0.25 - 0.18 * lane;
+		const left = !free(nearRight) && free(nearLeft);
+		const x = free(nearRight) ? nearRight : left ? nearLeft : Math.max(...between.map(n => n.x + n.w / 2)) + 0.25 + 0.18 * lane;
+		lane++;
+		// it leaves and enters at its side, or below and above where a block is beside its end there
+		const beside = n => placed.some(m => m !== n && Math.abs(m.y - n.y) < 0.01 && (left ? m.x < n.x : m.x > n.x));
+		const below = from.y - from.h / 2 - 0.2, above = to.y + to.h / 2 + 0.2, anchor = left ? 'west' : 'east';
 		const back = { ...e, kind: 'back',
-			start: beside(from) ? `(mr-${e.from}.south)` : `(mr-${e.from}.east)`,
-			end: beside(to) ? `(mr-${e.to}.north)` : `(mr-${e.to}.east)` };
+			start: beside(from) ? `(mr-${e.from}.south)` : `(mr-${e.from}.${anchor})`,
+			end: beside(to) ? `(mr-${e.to}.north)` : `(mr-${e.to}.${anchor})` };
 		placed.lanes ??= new Map();
 		placed.lanes.set(back, [
-			...beside(from) ? [[from.x, below], [right, below]] : [[right, from.y]],
-			...beside(to) ? [[right, above], [to.x, above]] : [[right, to.y]]
+			...beside(from) ? [[from.x, below], [x, below]] : [[x, from.y]],
+			...beside(to) ? [[x, above], [to.x, above]] : [[x, to.y]]
 		]);
 		return back;
 	});
@@ -1232,14 +1598,85 @@ export function playgroundHash(lines, marks = [], at) {
 		at ? `p=${at}` : ''].filter(Boolean).join('&');
 }
 
+/**
+ * The lines of a side file of magic-r that a request names: all of the file, or with `part` the lines
+ * after '## magic-r part <part>' up to the next such line. undefined without the file or the part.
+ */
+export function sideLines(r) {
+	if(typeof r.file !== 'string' || !/^[\w.-]+$/.test(r.file) || !fs.existsSync(r.file)) {
+		return undefined;
+	}
+	const lines = fs.readFileSync(r.file, 'utf8').replace(/\n$/, '').split('\n');
+	if(r.part === undefined) {
+		return lines;
+	}
+	const start = lines.indexOf(`## magic-r part ${r.part}`);
+	if(start < 0) {
+		return undefined;
+	}
+	const end = lines.findIndex((l, i) => i > start && /^## magic-r part /.test(l));
+	return lines.slice(start + 1, end < 0 ? lines.length : end);
+}
+
+// the characters of flowR's output as ASCII, as listings reads no other ('╰' of a tree, '≈' of a time)
+const ASCII = { '╰': '+', '╭': '+', '├': '+', '└': '+', '┌': '+', '┐': '+', '┘': '+', '─': '-', '━': '-', '│': '|',
+	'≈': '~', '…': '...', '→': '->', '←': '<-', '✓': 'ok', '✗': 'x', '×': 'x', '•': '*', '·': '.', '“': '"', '”': '"', '‘': "'", '’': "'" };
+export function ascii(line) {
+	return [...line].map(c => c.charCodeAt(0) < 128 ? c : ASCII[c] ?? (/\s/u.test(c) ? ' ' : '?')).join('');
+}
+
+/**
+ * The sessions of flowR's REPL (\begin{flowrsession}): each input (a command, ':dataflow* x', or R,
+ * which runs as ':execute') with what flowR prints for it. The inputs run in one REPL, apart by an
+ * unknown command (':mrstep<k>'), whose message marks where the answer of input k starts:
+ * \mrFlowrSession{name}{inputs} and \mrFlowrSessionLine{name}{input}{line in hex} (any character).
+ */
+export function sessionTexts(repl, requests, dir) {
+	const out = [];
+	for(const r of requests.filter(r => r.kind === 'session' && /^[\w.:-]+$/.test(String(r.name)) && Array.isArray(r.inputs))) {
+		const inputs = r.inputs.map(String).filter(l => l.trim());
+		const cmds = inputs.flatMap((l, k) => [`:mrstep${k}`, l.trim().startsWith(':') ? l.trim() : `:execute ${l.trim()}`]);
+		let text;
+		try {
+			text = repl.raw(cmds, dir, r.rcode === true);
+		} catch(e) {
+			out.push(`\\mrFlowrSessionFailed{${r.name}}{${texMessage(e.message)}}`);
+			continue;
+		}
+		const steps = inputs.map(() => []);
+		let k = -1;
+		// no colors, and no note that a link went to the clipboard
+		for(const line of text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n')) {
+			const m = /^the command 'mrstep(\d+)[^']*' is unknown/.exec(line);
+			if(m) {
+				k = Number(m[1]);
+			} else if(k >= 0 && k < steps.length && !/^Copied .* to clipboard/.test(line)) {
+				steps[k].push(line.replace(/\s+$/, ''));
+			}
+		}
+		const trim = lines => {
+			let a = 0, b = lines.length;
+			while(a < b && !lines[a].trim()) {
+				a++;
+			}
+			while(b > a && !lines[b - 1].trim()) {
+				b--;
+			}
+			return lines.slice(a, b);
+		};
+		out.push(`\\mrFlowrSession{${r.name}}{${steps.length}}`, ...steps.flatMap((lines, i) =>
+			trim(lines).map(l => `\\mrFlowrSessionLine{${r.name}}{${i + 1}}{${Buffer.from(ascii(l), 'utf8').toString('hex')}}`)));
+	}
+	return out;
+}
+
 /** the links of the listings that ask for one (no flowR needed): \mrFlowrPlayground{name}{hash} */
 export function playgroundTexts(code) {
 	const { blocks, requests } = parseCode(code);
 	return requests.filter(r => r.kind === 'playground' && /^[\w.:-]+$/.test(String(r.name))).flatMap(r => {
 		// the code with its indentation, which magic-r writes to a file of its own, else as flowR gets it
 		const b = blockOf(blocks, r.block);
-		const file = typeof r.file === 'string' && /^[\w.-]+$/.test(r.file) && fs.existsSync(r.file) ? r.file : undefined;
-		const lines = file ? fs.readFileSync(file, 'utf8').split('\n') : b?.lines;
+		const lines = sideLines(r) ?? b?.lines;
 		const marks = [].concat(r.marks ?? []).map(c => criterion(c, lines ?? [])).filter(c => /^\d+(:\d+|@.+)?$/.test(c));
 		return lines ? [`\\mrFlowrPlayground{${r.name}}{${playgroundHash(lines, marks)}}`] : [];
 	});
@@ -1263,8 +1700,12 @@ const REQUESTS = {
  * \mrFlowArrow{block}{line}{column}{line}{column}{group}{tracks and lane} from the use to the definition,
  * and \mrFlowArrowCriterion{block}{line}{column}{group} for a name a criterion points at. With all,
  * the groups are apart (each can be shown alone), so each gets tracks and lanes of its own.
+ * The criteria of `calls` point at calls (or at the name of a function, for all of its calls; 'all'
+ * takes every call): \mrFlowCallArrow from a call to the definition of the function it calls.
+ * `route` 'auto' (the default) lets an arrow to a definition above run over the top where it can
+ * (arrowTracks), 'side' keeps every arrow beside the code.
  */
-export function arrowTexts(block, answer, lines, criteria = [], all = false) {
+export function arrowTexts(block, answer, lines, criteria = [], all = false, calls = [], route = 'auto') {
 	const g = graphOf(answer);
 	if(!g) {
 		return [];
@@ -1273,16 +1714,31 @@ export function arrowTexts(block, answer, lines, criteria = [], all = false) {
 	const vertexAt = new Map([...g.vertices.keys()].map(v => [at(v) && `${at(v).line}:${at(v).col}`, v]));
 	const groups = new Map(), arrows = [], seen = new Set(), marks = [];
 	const group = key => groups.get(key) ?? groups.set(key, groups.size + 1).get(key);
+	const push = (u, d, k, call) => {
+		if(d && !seen.has(`${u.line}:${u.col}>${d.line}:${d.col}`)) {
+			seen.add(`${u.line}:${u.col}>${d.line}:${d.col}`);
+			arrows.push({ lu: u.line, cu: u.col, nu: u.text.length, ld: d.line, cd: d.col, nd: d.text.length, g: k, call });
+		}
+	};
 	const from = (id, k) => {
-		const u = at(id);
 		for(const [t, types] of g.out(id)) {
-			const d = at(t);
-			if(types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef' && d && !seen.has(`${u.line}:${u.col}>${d.line}:${d.col}`)) {
-				seen.add(`${u.line}:${u.col}>${d.line}:${d.col}`);
-				arrows.push({ lu: u.line, cu: u.col, ld: d.line, cd: d.col, g: k });
+			if(types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef') {
+				push(at(id), at(t), k, false);
 			}
 		}
 	};
+	// the names a function is defined as ('f' of 'f <- function'): fdef -> the vdefs it defines
+	const named = new Map();
+	for(const [id, v] of g.vertices) {
+		for(const [t, types] of v.tag === 'vdef' ? g.out(id) : []) {
+			if(types & EDGE.definedBy && g.vertices.get(t)?.tag === 'fdef' && at(id)) {
+				named.set(t, [...named.get(t) ?? [], id]);
+			}
+		}
+	}
+	const callees = id => g.out(id).filter(([t, types]) => types & EDGE.calls && named.has(t)).flatMap(([t]) => named.get(t));
+	const fromCall = (id, k) => callees(id).forEach(d => push(at(id), at(d), k, true));
+	const callsOf = def => [...g.vertices].filter(([id, v]) => v.tag === 'fcall' && at(id) && callees(id).includes(def)).map(([id]) => id);
 	[].concat(criteria).forEach((c, i) => {
 		const p = place(c, lines), id = p && vertexAt.get(p.join(':'));
 		if(id !== undefined) {
@@ -1291,6 +1747,30 @@ export function arrowTexts(block, answer, lines, criteria = [], all = false) {
 			from(id, k);
 		}
 	});
+	const allCalls = [].concat(calls).some(c => String(c).trim() === 'all');
+	[].concat(calls).filter(c => String(c).trim() !== 'all').forEach((c, i) => {
+		const p = place(c, lines), id = p && vertexAt.get(p.join(':'));
+		if(id !== undefined) {
+			const k = group(all ? at(id).text : `call ${i}`);
+			marks.push(`\\mrFlowArrowCriterion{${block}}{${p[0]}}{${p[1]}}{${k}}`);
+			if(g.vertices.get(id)?.tag === 'fcall') {
+				fromCall(id, k);
+			} else {
+				callsOf(id).forEach(c2 => push(at(c2), at(id), k, true));
+			}
+		}
+	});
+	if(allCalls || all && [].concat(calls).length) {
+		for(const [id, v] of g.vertices) {
+			if(v.tag === 'fcall' && at(id) && callees(id).length) {
+				const k = group(all ? at(id).text : `calls of ${at(callees(id)[0]).text}`);
+				if(all) {
+					marks.push(`\\mrFlowArrowName{${block}}{${at(id).line}}{${at(id).col}}{${k}}`);
+				}
+				fromCall(id, k);
+			}
+		}
+	}
 	if(all) {
 		for(const [id, v] of g.vertices) {
 			const n = at(id);
@@ -1303,8 +1783,11 @@ export function arrowTexts(block, answer, lines, criteria = [], all = false) {
 			}
 		}
 	}
-	const placed = all ? [...new Set(arrows.map(a => a.g))].flatMap(k => arrowTracks(arrows.filter(a => a.g === k))) : arrowTracks(arrows);
-	return [...placed.map(a => `\\mrFlowArrow{${block}}{${a.lu}}{${a.cu}}{${a.ld}}{${a.cd}}{${a.g}}{${a.ut}}{${a.dt}}{${a.lane}}`), ...marks];
+	const placed = all ? [...new Set(arrows.map(a => a.g))].flatMap(k => arrowTracks(arrows.filter(a => a.g === k), lines, route))
+		: arrowTracks(arrows, lines, route);
+	// the last argument: the lane, where the arrow ends and starts among those of its names, and the
+	// column of the lanes right of the code ('lane/i/n/i/n/column')
+	return [...placed.map(a => `\\mrFlow${a.call ? 'Call' : ''}Arrow{${block}}{${a.lu}}{${a.cu}}{${a.ld}}{${a.cd}}{${a.g}}{${a.ut}}{${a.dt}}{${a.lane}/${a.ei}/${a.en}/${a.si}/${a.sn}/${a.rc}}`), ...marks];
 }
 
 /**
@@ -1312,8 +1795,13 @@ export function arrowTexts(block, answer, lines, criteria = [], all = false) {
  * from its column to the left of the code (column 0), along a lane up or down, and below the line of its
  * definition to its column (one segment if both are in one line). Segments below one line that overlap
  * get tracks of their own (0 is closest to the line), vertical ones that overlap lanes of their own.
+ * With `route` 'auto' (the default), an arrow to a definition above leaves its use at the top: straight up
+ * from the middle of the use to below the line of the definition and into it (lane -2, track `ut` below
+ * the line of the definition), else below the line above the use to the middle of the definition and
+ * up into it (lane -1, track `ut` below the line above the use). Each only if no letter is in its way in
+ * the lines between and no other arrow runs up there.
  */
-export function arrowTracks(arrows) {
+export function arrowTracks(arrows, lines = [], route = 'auto') {
 	const rows = new Map();
 	const lanes = [];
 	const free = (list, lo, hi) => {
@@ -1326,18 +1814,83 @@ export function arrowTracks(arrows) {
 	};
 	const row = l => rows.get(l) ?? rows.set(l, []).get(l);
 	const span = a => a.lu === a.ld ? Math.abs(a.cu - a.cd) : a.cu + a.cd + 1000 * Math.abs(a.lu - a.ld);
+	// the columns of the middle of a name: one, or the two around it for an even length
+	const middle = (c, n) => n % 2 ? [c + (n - 1) / 2] : [c + n / 2 - 1, c + n / 2];
+	const blank = (l, c) => !/\S/.test(lines[l - 1]?.[c - 1] ?? ' ');
+	// the ways up: their column, lines, and the name they share it with (a use or a definition)
+	const ups = [];
+	// the columns of a name: a way up may leave or enter it anywhere, as ends spread over it
+	const all = (c, n) => Array.from({ length: n }, (_, i) => c + i);
+	const clear = (a, cols, key) => {
+		for(let l = a.ld + 1; l < a.lu; l++) {
+			if(!cols.every(c => blank(l, c))) {
+				return false;
+			}
+		}
+		return !ups.some(u => cols.includes(u.col) && u.lo <= a.lu - 1 && a.ld + 1 <= u.hi && u.key !== key);
+	};
+	const up = (a, cols, key, lane, line) => {
+		const ends = [a.cu, a.cu + (a.nu ?? 1) - 1, a.cd, a.cd + (a.nd ?? 1) - 1];
+		a.ut = free(row(line), Math.min(...ends), Math.max(...ends));
+		a.dt = 0;
+		a.lane = lane;
+		ups.push(...cols.map(col => ({ col, key, lo: a.ld + 1, hi: a.lu - 1 })));
+	};
+	const right = [];
 	for(const a of [...arrows].sort((x, y) => span(x) - span(y))) {
-		if(a.lu === a.ld) {
+		const fromUse = all(a.cu, a.nu ?? 1), intoDef = all(a.cd, a.nd ?? 1);
+		if(route === 'auto' && a.ld < a.lu && clear(a, fromUse, `u${a.lu}:${a.cu}`)) {
+			up(a, fromUse, `u${a.lu}:${a.cu}`, -2, a.ld);
+		} else if(route === 'auto' && a.ld < a.lu && clear(a, intoDef, `d${a.ld}:${a.cd}`)) {
+			up(a, intoDef, `d${a.ld}:${a.cd}`, -1, a.lu - 1);
+		} else if(a.lu === a.ld) {
 			a.ut = a.dt = free(row(a.lu), Math.min(a.cu, a.cd), Math.max(a.cu, a.cd));
 			a.lane = 0;
+		} else if(a.call) {
+			// a call runs along a lane right of the code (lane RIGHT + k), apart from the dataflow at the left
+			a.ut = free(row(a.lu), a.cu, Infinity);
+			a.dt = free(row(a.ld), a.cd, Infinity);
+			a.lane = RIGHT + free(right, Math.min(a.lu, a.ld), Math.max(a.lu, a.ld));
 		} else {
 			a.ut = free(row(a.lu), 0, a.cu);
 			a.dt = free(row(a.ld), 0, a.cd);
 			a.lane = free(lanes, Math.min(a.lu, a.ld), Math.max(a.lu, a.ld));
 		}
 	}
+	// arrows that share a name spread over it, in the order of where they come from or go to: the
+	// left lane first, then by column, the right lane last
+	const side = (a, col) => a.lane >= RIGHT ? 1e6 + a.lane : a.lane >= 0 && a.lu !== a.ld ? -1 - a.lane : col;
+	const spread = (key, order, set) => {
+		const groups = new Map();
+		arrows.forEach(a => groups.set(key(a), [...groups.get(key(a)) ?? [], a]));
+		for(const list of groups.values()) {
+			list.sort((x, y) => order(x) - order(y)).forEach((a, i) => set(a, i + 1, list.length));
+		}
+	};
+	spread(a => `${a.ld}:${a.cd}`, a => side(a, a.cu), (a, i, n) => Object.assign(a, { ei: i, en: n }));
+	spread(a => `${a.lu}:${a.cu}`, a => side(a, a.cd), (a, i, n) => Object.assign(a, { si: i, sn: n }));
+	// the tracks below the line of a name, so that the arrows into it (or out of it) do not cross: from
+	// the left, the one further left is closer to the line; from the right, the one further right
+	const balance = (key, track, place) => {
+		const groups = new Map();
+		for(const a of arrows.filter(x => x.lane >= 0 && x.lu !== x.ld)) {
+			const k = `${key(a)}:${a.lane >= RIGHT ? 'r' : 'l'}`;
+			groups.set(k, [...groups.get(k) ?? [], a]);
+		}
+		for(const [k, list] of groups) {
+			const tracks = list.map(a => a[track]).sort((x, y) => x - y);
+			list.sort((x, y) => k.endsWith('r') ? y[place] - x[place] : x[place] - y[place]).forEach((a, i) => a[track] = tracks[i]);
+		}
+	};
+	balance(a => `${a.ld}:${a.cd}`, 'dt', 'ei');
+	balance(a => `${a.lu}:${a.cu}`, 'ut', 'si');
+	// the right lane starts after the longest line
+	const rc = Math.max(0, ...lines.map(l => l.trimEnd().length));
+	arrows.forEach(a => a.rc = rc);
 	return arrows;
 }
+/** the lanes right of the code (calls) are numbered from here */
+export const RIGHT = 1000;
 
 /**
  * The findings of flowR's linter in a block: every line a finding spans gets \mrFlowLint{block@line}
@@ -1376,7 +1929,7 @@ export function lintTexts(block, answer, lines) {
  */
 /** the distance between the rows of a graph a request asks for (cm) */
 const graphOptions = r => ({ ...Number(r.rowsep) >= 0 ? { vgap: Number(r.rowsep) } : {}, ...r.function ? { function: String(r.function) } : {},
-	...r.files ? { files: r.files } : {} });
+	...r.files ? { files: r.files } : {}, ...r.lines === true ? { lines: true } : {} });
 
 /**
  * The flowR of a request that names one ('docker:eagleoutice/flowr:2.14.0', 'node:node ~/flowr/dist/src/cli/flowr.js'),
@@ -1418,9 +1971,10 @@ export function requestTexts(repl, requests, blocks, dir, opts = {}) {
 		}
 		// a slice is computed on all the code of its listing, which magic-r keeps in a file of its own
 		let shown;
-		if(r.kind === 'slice' && typeof r.file === 'string' && /^[\w.-]+$/.test(r.file) && fs.existsSync(r.file)) {
+		const side = r.kind === 'slice' ? sideLines(r) : undefined;
+		if(side) {
 			shown = lines;
-			lines = fs.readFileSync(r.file, 'utf8').replace(/\n$/, '').split('\n');
+			lines = side;
 		}
 		if(!lines) {
 			continue;
@@ -1475,7 +2029,7 @@ const ANSWERS = {
 	dataflow:       ({ r, lines }, a) => [dataflowGraph(r.name, a, lines, graphOptions(r))],
 	'call-graph':   ({ r, lines }, a) => [callGraph(r.name, a, lines, graphOptions(r))],
 	'control-flow': ({ r, lines }, a) => [controlFlowGraph(r.name, a, lines, graphOptions(r))],
-	arrows:         ({ r, lines }, a) => arrowTexts(r.block, a, lines, r.criteria, r.all === true),
+	arrows:         ({ r, lines }, a) => arrowTexts(r.block, a, lines, r.criteria, r.all === true, r.calls ?? [], r.route === 'side' ? 'side' : 'auto'),
 	lint:           ({ r, lines }, a) => lintTexts(r.block, a, lines),
 	slice:          ({ r, lines, shown }, a) => {
 		const kept = sliceLines(a);
@@ -1688,14 +2242,24 @@ export function rExports(rscript, pkgs) {
 	}
 	const code = `for (p in commandArgs(TRUE)) if (nzchar(system.file(package = p))) {
 		x <- if (p == "base") ls(baseenv(), all.names = TRUE) else tryCatch(getNamespaceExports(p), error = function(e) character())
-		cat(paste(p, packageDescription(p)$Version, x, sep = "\t"), sep = "\n") }`;
+		env <- if (p == "base") baseenv() else asNamespace(p)
+		internal <- tryCatch(tools:::.get_internal_S3_generics(), error = function(e) .S3PrimitiveGenerics)
+		dispatches <- function(e) is.call(e) && (identical(e[[1L]], as.name("UseMethod")) || any(vapply(as.list(e), dispatches, logical(1))))
+		g <- vapply(x, function(n) tryCatch({ f <- get(n, envir = env)
+			if (!is.function(f)) "d" else if (n %in% internal || dispatches(body(f))) "g" else "" }, error = function(e) ""), character(1))
+		cat(paste(p, packageDescription(p)$Version, x, g, sep = "\t"), sep = "\n") }`;
 	try {
 		const res = run([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 120 });
 		for(const line of (res.stdout ?? '').split('\n')) {
-			const [p, version, name] = line.split('\t');
+			const [p, version, name, generic] = line.split('\t');
 			if(name) {
-				const e = out.get(p) ?? out.set(p, { version, fns: [] }).get(p);
+				const e = out.get(p) ?? out.set(p, { version, fns: [], generics: [], data: [] }).get(p);
 				e.fns.push({ name });
+				if(generic === 'g') {
+					e.generics.push(name);
+				} else if(generic === 'd') {
+					e.data.push(name);
+				}
 			}
 		}
 	} catch{ /* R is optional */ }
@@ -1766,7 +2330,8 @@ export function backends(opts) {
 	for(const kind of kinds) {
 		if(kind === 'node') {
 			const cmd = opts.flowr ?? process.env.MAGIC_R_FLOWR ?? onPath('flowr');
-			const argv = cmd ? splitCommand(cmd) : npmFlowr();
+			// an empty $MAGIC_R_FLOWR means no command line, not 'look for one'
+			const argv = cmd ? splitCommand(cmd) : cmd === undefined ? npmFlowr() : undefined;
 			if(argv) {
 				out.push(new Repl('node', argv, { timeout, engine: opts.engine }));
 			}
@@ -1848,13 +2413,22 @@ export async function packageEntries(backend, wanted, opts, dir) {
 		}
 		const topics = helpTopics(opts.rscript, missing.map(w => w.pkg));
 		const versions = rVersions(opts.rscript, missing.map(w => w.pkg));
+		const shipped = shippedPages();
 		for(const w of missing) {
 			const s = found.get(w.pkg), help = topics.get(w.pkg);
-			const fns = [...s?.fns ?? [], ...helpAliases(help, s?.fns, installed.get(w.pkg)?.fns), ...(help?.data ?? []).map(name => ({ name }))];
+			// the page of a name: R's help index, else the shipped database (verified), else what flowR
+			// says, which names a page after the function, not its topic ('return' is on 'function')
+			const page = f => shipped.get(`${w.pkg}::${f.name}`);
+			const fns = [...s?.fns ?? [], ...helpAliases(help, s?.fns, installed.get(w.pkg)?.fns), ...(help?.data ?? []).map(name => ({ name }))]
+				.map(f => page(f) ? { name: f.name, docUrl: page(f) } : f);
 			if(!fns.length) {
 				continue;
 			}
-			const text = packageEntry(w.pkg, versions.get(w.pkg) ?? s?.version ?? 'unknown', withHelp(fns, help));
+			// R knows the generics of its own packages, which are never guessed ('freeny.x' is a data set)
+			const generics = installed.get(w.pkg)?.generics ?? (BASE_PACKAGES.includes(w.pkg) ? [] : undefined);
+			// what is no function: objects R knows (letters, pi) and the data sets of the help index
+			const data = [...installed.get(w.pkg)?.data ?? [], ...help?.data ?? []];
+			const text = packageEntry(w.pkg, versions.get(w.pkg) ?? s?.version ?? 'unknown', withHelp(fns, help), generics, data);
 			entries.set(w.pkg, text);
 			const f = file({ ...w, version: s.version });
 			if(f) {
@@ -1885,7 +2459,7 @@ export async function documentText(backend, code, opts, dir) {
 			if(web) {
 				throw new Error('the web backend answers no queries');
 			}
-			answered = requestTexts(backend, requests, blocks, dir, opts);
+			answered = [...requestTexts(backend, requests, blocks, dir, opts), ...sessionTexts(backend, requests, dir)];
 		} catch(e) {
 			answered = [`\\mrFlowrRequestsFailed{${texMessage(e.message)}}`];
 		}
@@ -1923,6 +2497,26 @@ export async function documentCommand(opts, [input, output]) {
 	}
 	// links into the playground need no flowR
 	writeAtomic(output, text + playgroundTexts(code).map(t => t + '\n').join(''));
+	if(opts.cleanup !== false) {
+		staleSideFiles(input).forEach(f => fs.rmSync(f, { force: true }));
+	}
+}
+
+/**
+ * The side files of older versions of magic-r beside the code of a document ('doc.mr.R'): one per
+ * listing, 'doc.mr-play-3.R' and 'doc.mr-slice-3.R'. Now one file of each kind holds all listings.
+ */
+export function staleSideFiles(input) {
+	const dir = path.dirname(input), job = path.basename(input).replace(/\.mr\.R$/, '');
+	if(job === path.basename(input)) {
+		return [];
+	}
+	const old = new RegExp(`^${job.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.mr-(play|slice)-\\d+\\.R$`);
+	try {
+		return fs.readdirSync(dir).filter(f => old.test(f)).map(f => path.join(dir, f));
+	} catch{
+		return [];
+	}
 }
 
 export async function generateCommand(opts, [list]) {
@@ -1975,6 +2569,21 @@ export function databaseUrls(text) {
 		}
 	}
 	return urls;
+}
+
+/** the pages of the shipped database: 'pkg::name' -> url */
+let shippedCache;
+export function shippedPages(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'magic-r-links.cfg')) {
+	if(!shippedCache || shippedCache.file !== file) {
+		const pages = new Map();
+		try {
+			for(const [url, names] of databaseUrls(fs.readFileSync(file, 'utf8'))) {
+				names.forEach(n => pages.set(n, url));
+			}
+		} catch{ /* no database */ }
+		shippedCache = { file, pages };
+	}
+	return shippedCache.pages;
 }
 
 /** the database without the names whose page is one of `dead`, except the ones `moved` (pkg::name -> url) gives another page */
@@ -2084,6 +2693,8 @@ export function parseArgs(argv) {
 	for(let i = 0; i < argv.length; i++) {
 		if(argv[i] === '--no-cache') {
 			opts.noCache = true;
+		} else if(argv[i] === '--no-cleanup') {
+			opts.cleanup = false;
 		} else if(argv[i] === '--prune') {
 			opts.prune = true;
 		} else if(keys[argv[i]]) {
@@ -2112,7 +2723,25 @@ async function main() {
 	process.exitCode = cmd === undefined || cmd === '--help' || cmd === '-h' ? 0 : 2;
 }
 
-if(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/**
+ * Whether node runs this file (not a test importing it): node gives the module its real path, but
+ * argv the path it was called by, which may pass a symlink (a linked TEXMF tree or checkout).
+ */
+export function isMain(argv1 = process.argv[1], url = import.meta.url) {
+	if(!argv1) {
+		return false;
+	}
+	const real = p => {
+		try {
+			return fs.realpathSync(p);
+		} catch{
+			return path.resolve(p);
+		}
+	};
+	return real(argv1) === real(fileURLToPath(url));
+}
+
+if(isMain()) {
 	main().catch(e => {
 		console.error(`error: ${e.message}`);
 		process.exitCode = 1;
