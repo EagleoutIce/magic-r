@@ -6,10 +6,12 @@ LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/00Index.html
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
 TARGET: mr.2.total
 COPY: <-
+TARGET: mr.2.values@1
 TARGET: mr.2.values
+TARGET: mr.2.na.rm@1
 TARGET: mr.2.na.rm
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/sum.html
-INTERNAL: mr.2.values
+INTERNAL: mr.2.values@1
 ============================================================
 TEST: right assignment and assign
 COPY: ->

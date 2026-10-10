@@ -181,14 +181,14 @@
   \ifcsname mr@user@\mr@token\endcsname\let\lst@thestyle\mr@keyword\fi
   \expandafter\in@\expandafter:\expandafter{\mr@token}\ifin@\let\lst@thestyle\mr@keyword\fi\fi\fi}
 % #1 typeset word; \mr@token its name, \mr@role what the code around makes of it
-\def\mr@keyword#1{\ifx\mr@role\mr@role@flow\mr@flowlink{#1}\else\ifx\mr@role\mr@role@ext\mr@libraryword{#1}\else
+\def\mr@keyword#1{\ifx\mr@role\mr@role@sparam\mr@sparamdef{#1}\else\ifx\mr@role\mr@role@flow\mr@flowlink{#1}\else\ifx\mr@role\mr@role@ext\mr@libraryword{#1}\else
   \ifx\mr@role\mr@role@plain#1\else
   \ifx\mr@role\mr@role@def\ifcsname mr@user@\mr@token\endcsname\expandafter\mr@linkword\expandafter{\mr@token}{#1}\else#1\fi\else
   \expandafter\in@\expandafter:\expandafter{\mr@token}%
   \ifin@\expandafter\mr@colons\mr@token\@nil\else
   \ifx\mr@role\mr@role@pkg\mr@pkgname\mr@token\else
-  \expandafter\mr@linkword\expandafter{\mr@token}{#1}\fi\fi\fi\fi\fi\fi}
-\def\mr@role@flow{flow}\def\mr@role@ext{ext}
+  \mr@scopedword{#1}\fi\fi\fi\fi\fi\fi\fi}
+\def\mr@role@flow{flow}\def\mr@role@ext{ext}\def\mr@role@sparam{sparam}
 \def\mr@role@plain{plain}\def\mr@role@pkg{pkg}\def\mr@role@def{def}\def\mr@role{}
 % #1 name, #2 typeset word
 \def\mr@linkword#1#2{\def\mr@token{#1}%
@@ -308,7 +308,7 @@
 \lst@AddToHook{Output}{\global\mr@defherefalse\ifmr@active\mr@inroxygen\lst@ifkeywords
   \ifmr@quiet\let\lst@thestyle\lst@currstyle\else\mr@outword\fi
   \else\ifmr@roxygen\mr@tokenname\mr@roxyword\else\mr@stringword\fi\global\let\mr@lastword\relax\fi\fi}
-\def\mr@outword{\global\advance\mr@word\@ne
+\def\mr@outword{\global\advance\mr@word\@ne\mr@bodyword
   \let\mr@role\@empty\let\mr@flowhit\relax\let\mr@flowcol\relax
   \ifcsname mr@flow@\the\mr@lstid\endcsname\mr@flowkey
     \ifcsname mr@fl@\mr@flowat\endcsname\expandafter\let\expandafter\mr@flowhit\csname mr@fl@\mr@flowat\endcsname\fi\fi
@@ -354,10 +354,40 @@
 % #1 kind: the word is defined here, in a displayed listing
 \def\mr@localdef#1{\ifmr@defs\lst@ifdisplaystyle\mr@define{#1}\mr@known\let\mr@role\mr@role@def
   \mr@defocc{\the\mr@word}\fi\fi}
-% a parameter only counts within its listing, and only if the listing does
-% not define the name otherwise (the last run knows)
-\def\mr@paramdef{\let\mr@role\mr@role@plain
-  \ifcsname mr@knownv@\mr@token @\the\mr@lstid\endcsname\else\mr@localdef{param}\fi}
+% a parameter is the target of the uses in the body of its function
+% ('mr.<listing>.<name>@<function>'). Outside of it, it only counts within its
+% listing, and only if the listing does not define the name otherwise (the last run knows)
+\def\mr@paramdef{\let\mr@role\mr@role@plain\ifmr@defs\lst@ifdisplaystyle
+  \csgdef{mr@p@\the\mr@lstid @\mr@curfn @\mr@token}{}%
+  \ifcsname mr@knownv@\mr@token @\the\mr@lstid\endcsname\else\mr@localdef{param}\fi
+  \let\mr@role\mr@role@sparam\fi\fi}
+\def\mr@sparamdef#1{\mr@ptarget{\mr@token @\mr@curfn}%
+  \ifcsname mr@knownv@\mr@token @\the\mr@lstid\endcsname\else\mr@ptarget\mr@token\fi
+  {\colorlet{mr@plain}{.}\mr@style@param#1}}
+\def\mr@ptarget#1{\ifcsname mr@placed@\the\mr@lstid @#1\endcsname\else\csgdef{mr@placed@\the\mr@lstid @#1}{}%
+  \ifdefined\hypertarget\mr@target{mr.\the\mr@lstid.#1}\fi\fi}
+% the bodies of the functions around a word, innermost first: \mr@sc{function}{type}{depth}{braces},
+% type b for a body in braces, e for one expression, which ends at ')', ',', ';', '}', or the line
+\newcount\mr@bdepth\newcount\mr@fnid
+\def\mr@scopes{}\def\mr@bodywait{}\def\mr@curfn{0}
+\def\mr@push#1{\xdef\mr@scopes{\noexpand\mr@sc{\mr@bodywait}{#1}{\the\mr@depth}{\the\mr@bdepth}%
+  \unexpanded\expandafter{\mr@scopes}}\global\let\mr@bodywait\@empty}
+\def\mr@bodyword{\ifx\mr@bodywait\@empty\else\mr@push{e}\fi}
+\def\mr@bodychar{\ifx\mr@bodywait\@empty\else\ifx\mr@c\mr@lbrace\mr@push{b}\else\mr@push{e}\fi\fi}
+% #1 a test of \mr@st, \mr@sp, \mr@sb that sets \ifin@: drops the innermost bodies while it holds
+\def\mr@popif#1{\ifx\mr@scopes\@empty\else\expandafter\mr@popif@\mr@scopes\@nil{#1}\fi}
+\def\mr@popif@\mr@sc#1#2#3#4#5\@nil#6{\def\mr@st{#2}\def\mr@sp{#3}\def\mr@sb{#4}\in@false#6%
+  \ifin@\gdef\mr@scopes{#5}\expandafter\mr@popif\expandafter#6\fi}
+\def\mr@endexpr{\if e\mr@st\ifnum\mr@depth=\mr@sp\relax\ifnum\mr@bdepth=\mr@sb\relax\in@true\fi\fi\fi}
+\def\mr@endpar{\if e\mr@st\ifnum\mr@depth<\mr@sp\relax\in@true\fi\fi}
+\def\mr@endbrace{\if b\mr@st\ifnum\mr@bdepth=\mr@sb\relax\in@true\fi\else\ifnum\mr@bdepth<\mr@sb\relax\in@true\fi\fi}
+% #1 typeset word: a parameter of a function around it, else the rules of the listing
+\def\mr@scopedword#1{\let\mr@pfn\relax\expandafter\mr@findparam\mr@scopes\mr@sc{}{}{}{}\@nil
+  \ifx\mr@pfn\relax\expandafter\mr@linkword\expandafter{\mr@token}{#1}\else
+  \mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.\the\mr@lstid.\mr@token @\mr@pfn}{\mr@underline{\mr@style@param#1}}}%
+  {{\mr@style@param#1}}\fi}
+\def\mr@findparam\mr@sc#1#2#3#4#5\@nil{\ifx\relax#1\relax\else
+  \ifcsname mr@p@\the\mr@lstid @#1@\mr@token\endcsname\def\mr@pfn{#1}\else\mr@findparam#5\@nil\fi\fi}
 % flowR: \mr@flowat is block@line@column of the current word, \mr@fl@<at> what flowR knows of it
 \def\mr@flowkey{\edef\mr@flowcol{\the\mr@col}%
   \edef\mr@flowat{\the\mr@lstid @\the\numexpr\mr@line+1\relax @\mr@flowcol}}
@@ -434,12 +464,13 @@
     \edef\mr@t{\detokenize\expandafter{\mr@t}}\expandafter\endgroup\expandafter\mr@others\mr@t\@nil
   \fi\fi\fi\fi}
 \def\mr@isbraced#1#2\@nil{\edef\mr@c{#1}\ifx\mr@c\mr@lbrace\in@true\else\in@false\fi}
-\edef\mr@lbrace{\expandafter\@gobble\string\{}
+\edef\mr@lbrace{\expandafter\@gobble\string\{}\edef\mr@rbrace{\expandafter\@gobble\string\}}
+\edef\mr@semi{\detokenize{;}}
 \edef\mr@assignraw{\detokenize{{\mr@op{<-}},{\mr@op{<<-}}}}
 \edef\mr@rassignraw{\detokenize{{\mr@op{->}},{\mr@op{->>}}}}
 \edef\mr@promptraw{\detokenize{\mr@nocopy}}
 \def\mr@literal#1{\expandafter\in@\expandafter{\mr@promptraw}{#1}\ifin@\else\mr@literal@{#1}\fi}
-\def\mr@literal@#1{\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi
+\def\mr@literal@#1{\mr@bodyword\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi
   \edef\mr@t{\noexpand\in@{,#1,}{,\mr@rassignraw,}}\mr@t\ifin@\gdef\mr@rassign{1}\else\gdef\mr@rassign{0}\fi
   \gdef\mr@asgstate{0}%
   \edef\mr@t{\noexpand\in@{,#1,}{,\mr@assignraw,}}\mr@t
@@ -447,7 +478,7 @@
   \global\let\mr@pending\@empty\gdef\mr@libstate{0}\global\let\mr@lastword\relax\global\mr@linestartfalse}
 \def\mr@others#1\@nil{\ifx\relax#1\relax\else\mr@others@#1\@nil\fi}
 \def\mr@others@#1#2\@nil{\mr@other{#1}{#2}}
-\def\mr@other#1#2{\edef\mr@c{#1}\gdef\mr@rassign{0}%
+\def\mr@other#1#2{\edef\mr@c{#1}\mr@bodychar\gdef\mr@rassign{0}%
     \ifnum\mr@asgstate=1 \ifx\mr@c\mr@lpar\gdef\mr@asgstate{2}\else\gdef\mr@asgstate{0}\fi
     \else\ifnum\mr@asgstate=3 \ifx\mr@c\mr@lpar\gdef\mr@asgstate{4}\else\gdef\mr@asgstate{0}\fi
     \else\ifnum\mr@asgstate>1 \ifx\mr@c\mr@quote\else\ifx\mr@c\mr@squote\else\gdef\mr@asgstate{0}\fi\fi\fi\fi\fi
@@ -457,10 +488,16 @@
       \gdef\mr@libstate{0}\fi
     \ifx\mr@c\mr@rpar\ifnum\mr@depth>\z@\global\advance\mr@depth\m@ne\fi
       \ifx\mr@libword\@empty\else\ifnum\mr@depth<\mr@libdepth\relax\global\let\mr@libword\@empty\fi\fi
-      \ifnum\mr@depth<\mr@params\global\mr@params\z@\fi\fi
+      \ifnum\mr@depth<\mr@params\global\mr@params\z@\global\let\mr@bodywait\mr@curfn\fi\fi
     \ifnum\mr@params>\z@\ifnum\mr@depth=\mr@params
       \ifx\mr@c\mr@eq\global\mr@defaulttrue\fi\ifx\mr@c\mr@comma\global\mr@defaultfalse\fi\fi\fi
-    \ifnum\mr@fnstate=1 \ifx\mr@c\mr@lpar\global\mr@params\mr@depth\global\mr@defaultfalse\fi\fi
+    \ifnum\mr@fnstate=1 \ifx\mr@c\mr@lpar\global\mr@params\mr@depth\global\mr@defaultfalse
+      \global\advance\mr@fnid\@ne\xdef\mr@curfn{\the\mr@fnid}\fi\fi
+    \ifx\mr@c\mr@lbrace\global\advance\mr@bdepth\@ne\fi
+    \ifx\mr@c\mr@rbrace\ifnum\mr@bdepth>\z@\global\advance\mr@bdepth\m@ne\fi\mr@popif\mr@endbrace\fi
+    \ifx\mr@c\mr@rpar\mr@popif\mr@endpar\fi
+    \ifx\mr@c\mr@comma\mr@popif\mr@endexpr\fi
+    \ifx\mr@c\mr@semi\mr@popif\mr@endexpr\fi
     \ifx\mr@c\mr@backslash\gdef\mr@fnstate{1}\else\gdef\mr@fnstate{0}\fi
     \ifx\mr@c\mr@dollar\global\mr@membertrue\fi
     \ifx\mr@c\mr@at\global\mr@membertrue\fi
@@ -496,7 +533,7 @@
 \def\mr@rhsdef#1{{\let\mr@token\mr@rhs\ifmr@indented\mr@define{local}\else\mr@define{#1}\fi
   \mr@defocc\mr@pendingword}%
   \global\let\mr@rhs\@empty}
-\lst@AddToHook{EOL}{\global\let\mr@pending\@empty\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi
+\lst@AddToHook{EOL}{\global\let\mr@pending\@empty\ifx\mr@rhs\@empty\else\mr@rhsdef{var}\fi\mr@popif\mr@endexpr
   \global\mr@linestarttrue\global\let\mr@lastword\relax\global\mr@memberfalse\gdef\mr@libstate{0}%
   \global\advance\mr@line\@ne\ifcsname mr@loads@\the\mr@lstid @\the\mr@line\endcsname
   \csname mr@loads@\the\mr@lstid @\the\mr@line\endcsname\fi}
@@ -586,6 +623,7 @@
 \lst@AddToHook{OutputOther}{\mr@markall}
 
 \lst@Key{magic-r}\relax[t]{\global\advance\mr@lstid\@ne\global\mr@word\z@\global\mr@depth\z@\global\mr@params\z@
+  \global\mr@bdepth\z@\global\mr@fnid\z@\gdef\mr@scopes{}\gdef\mr@bodywait{}
   \global\mr@line\z@\global\let\mr@pending\@empty\global\let\mr@rhs\@empty\gdef\mr@libstate{0}%
   \global\mr@linestarttrue\global\let\mr@lastword\relax\global\mr@memberfalse
   \gdef\mr@rassign{0}\gdef\mr@asgstate{0}\global\let\mr@libword\@empty\global\let\mr@lastmark\@empty

@@ -11,16 +11,18 @@ TEST: listing and overlays
 (beamer.vrb
 TARGET: mr.3.size
 COPY: <-
+TARGET: mr.3.x@1
 TARGET: mr.3.x
-INTERNAL: mr.3.x
+INTERNAL: mr.3.x@1
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
 LINK: https://cran.r-project.org/package=dplyr
 ) [2
 ] (beamer.vrb
 TARGET: mr.4.size
 COPY: <-
+TARGET: mr.4.x@1
 TARGET: mr.4.x
-INTERNAL: mr.4.x
+INTERNAL: mr.4.x@1
 LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
 LINK: https://cran.r-project.org/package=dplyr
 INTERNAL: mr.4.size
@@ -83,16 +85,18 @@ TEST: pause within a listing, then a use in the next frame
 (beamer.vrb
 TARGET: mr.7.twice
 COPY: <-
+TARGET: mr.7.x@1
 TARGET: mr.7.x
-INTERNAL: mr.7.x
-INTERNAL: mr.7.x
+INTERNAL: mr.7.x@1
+INTERNAL: mr.7.x@1
 ) [10
 ] (beamer.vrb
 TARGET: mr.8.twice
 COPY: <-
+TARGET: mr.8.x@1
 TARGET: mr.8.x
-INTERNAL: mr.8.x
-INTERNAL: mr.8.x
+INTERNAL: mr.8.x@1
+INTERNAL: mr.8.x@1
 ) [11
 ]
 (beamer.vrb

@@ -1,0 +1,35 @@
+% A parameter is the target of the uses in the body of its function, also
+% when the listing defines a variable of the same name outside of it.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\makeatletter\AtBeginDocument{\def\mr@style@param{\typeout{PARAM}}}\makeatother
+\begin{document}
+\WarmUp
+\START
+\BeginBox{a variable of the same name}
+\begin{mr}
+f <- function(df, col) nrow(df[col])
+df <- data.frame(a = 1)
+f(df, "a")
+\end{mr}
+\EndBox
+\BeginBox{bodies in braces, nested functions}
+\begin{mr}
+g <- function(x, y) {
+  h <- function(x) x + y
+  sapply(x, function(v) v * x)
+}
+x <- 1
+y <- g(x, 2)
+\end{mr}
+\EndBox
+\BeginBox{only a parameter}
+\begin{mr}
+k <- \(n) n + 1
+\end{mr}
+\EndBox
+\TEST{inline code}{\Typeset{\bmr{n col}}}
+\END

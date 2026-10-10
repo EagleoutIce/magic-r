@@ -1,0 +1,11 @@
+% The shipped database has every alias of a help page that the package
+% exports, also the primitives of base ('anyNA' is documented under 'NA').
+\input{regression-test}
+\documentclass{article}
+\usepackage[flowr=off]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\TEST{base}{\Typeset{\bmr{anyNA(x) is.na(x) attr(x, "a") all(x)}}}
+\END

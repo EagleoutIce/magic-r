@@ -58,7 +58,7 @@ export function texMessage(s) {
 }
 /** the width of the lines of a database, long lines read faster and keep the file short */
 export const LINE_WIDTH = 240;
-const CACHE_FORMAT = 'f2';
+const CACHE_FORMAT = 'f3';
 function wrap(names) {
 	const lines = [];
 	let line = '';
@@ -1658,14 +1658,14 @@ export function helpTopics(rscript, pkgs) {
 	return out;
 }
 
-/** the exports of installed packages, for packages flowR does not know: pkg -> {version, fns} */
+/** the exports of installed packages (for base, its whole environment, with the primitives): pkg -> {version, fns} */
 export function rExports(rscript, pkgs) {
 	const out = new Map();
 	if(!rscript || pkgs.length === 0) {
 		return out;
 	}
 	const code = `for (p in commandArgs(TRUE)) if (nzchar(system.file(package = p))) {
-		x <- tryCatch(getNamespaceExports(p), error = function(e) character())
+		x <- if (p == "base") ls(baseenv(), all.names = TRUE) else tryCatch(getNamespaceExports(p), error = function(e) character())
 		cat(paste(p, packageDescription(p)$Version, x, sep = "\t"), sep = "\n") }`;
 	try {
 		const res = run([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 120 });
@@ -1703,6 +1703,18 @@ export function rVersions(rscript, pkgs) {
  * topic from the name for names without a help page (dead links) and misses some aliases ('%>%').
  * A name the index lacks keeps its link only if the database knows a topic other than its name.
  */
+/**
+ * The aliases of the help index that the package exports but the signature database lacks
+ * ('anyNA' of the topic 'NA'). Internal names with a help page do not link.
+ */
+export function helpAliases(help, known, exported) {
+	if(!help || !exported) {
+		return [];
+	}
+	const have = new Set(known?.map(f => f.name)), out = new Set(exported.map(f => f.name));
+	return [...help.keys()].filter(a => out.has(a) && !have.has(a)).map(name => ({ name }));
+}
+
 export function withHelp(fns, help) {
 	if(!help) {
 		return fns;
@@ -1805,14 +1817,17 @@ export async function packageEntries(backend, wanted, opts, dir) {
 		const found = web ? new Map(missing.map(w => [w.pkg, backend.table.byName.get(w.pkg)]).filter(([, v]) => v))
 			: exportsWithFlowr(backend, missing, dir);
 		// what flowR does not know, an installed R may
-		for(const [p, e] of rExports(opts.rscript, missing.filter(w => !found.get(w.pkg)?.fns.length).map(w => w.pkg))) {
-			found.set(p, e);
+		const installed = rExports(opts.rscript, missing.map(w => w.pkg));
+		for(const w of missing) {
+			if(!found.get(w.pkg)?.fns.length && installed.has(w.pkg)) {
+				found.set(w.pkg, installed.get(w.pkg));
+			}
 		}
 		const topics = helpTopics(opts.rscript, missing.map(w => w.pkg));
 		const versions = rVersions(opts.rscript, missing.map(w => w.pkg));
 		for(const w of missing) {
 			const s = found.get(w.pkg), help = topics.get(w.pkg);
-			const fns = [...s?.fns ?? [], ...(help?.data ?? []).map(name => ({ name }))];
+			const fns = [...s?.fns ?? [], ...helpAliases(help, s?.fns, installed.get(w.pkg)?.fns), ...(help?.data ?? []).map(name => ({ name }))];
 			if(!fns.length) {
 				continue;
 			}

@@ -28,6 +28,7 @@ LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
 TARGET: mr.4.s
 COPY: <-
 COPY: <-
+TARGET: mr.4.a@1
 TARGET: mr.4.a
 ============================================================
 TEST: console listings are output

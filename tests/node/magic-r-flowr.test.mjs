@@ -92,6 +92,14 @@ test('the help index decides topics', () => {
 	assert.equal(m.withHelp(fns, undefined), fns);
 });
 
+test('aliases of the help index that the package exports', () => {
+	const help = new Map([['is.na', 'NA'], ['anyNA', 'NA'], ['internal', 'NA']]);
+	const exported = [{ name: 'is.na' }, { name: 'anyNA' }];
+	assert.deepEqual(m.helpAliases(help, [{ name: 'is.na' }], exported), [{ name: 'anyNA' }]);
+	assert.deepEqual(m.helpAliases(help, [], undefined), []);
+	assert.deepEqual(m.helpAliases(undefined, [], exported), []);
+});
+
 test('command lines and options', () => {
 	assert.deepEqual(m.splitCommand(`docker run "a b" 'c' d\\e ""`), ['docker', 'run', 'a b', 'c', 'd\\e', '']);
 	const { opts, rest } = m.parseArgs(['--backend', 'web', '--no-cache', 'in.R', '--timeout', '5', 'out.cfg', '--rscript', '-']);
@@ -183,7 +191,7 @@ test('failures become a status, never a missing file', async() => {
 test('packages are cached per flowR and package version', async() => {
 	const cache = tmp();
 	const first = await document('library(dplyr)\n', { noCache: false, cache });
-	const file = path.join(cache, 'flowr-2.15.10-f2', 'dplyr@1.2.1.cfg');
+	const file = path.join(cache, 'flowr-2.15.10-f3', 'dplyr@1.2.1.cfg');
 	assert.ok(fs.existsSync(file));
 	fs.writeFileSync(file, '\\mrPackage{dplyr}{1.2.1}{\\N{cached,}}\n');
 	const second = await document('library(dplyr)\n', { noCache: false, cache });

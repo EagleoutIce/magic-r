@@ -1,0 +1,63 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST: a variable of the same name
+TARGET: mr.2.f
+COPY: <-
+TARGET: mr.2.df@1
+PARAM
+TARGET: mr.2.col@1
+TARGET: mr.2.col
+PARAM
+INTERNAL: mr.2.df@1
+PARAM
+INTERNAL: mr.2.col@1
+PARAM
+TARGET: mr.2.df
+COPY: <-
+INTERNAL: mr.2.f
+INTERNAL: mr.2.df
+============================================================
+TEST: bodies in braces, nested functions
+TARGET: mr.3.g
+COPY: <-
+TARGET: mr.3.x@1
+PARAM
+TARGET: mr.3.y@1
+PARAM
+TARGET: mr.3.h
+COPY: <-
+TARGET: mr.3.x@2
+PARAM
+INTERNAL: mr.3.x@2
+PARAM
+INTERNAL: mr.3.y@1
+PARAM
+INTERNAL: mr.3.x@1
+PARAM
+TARGET: mr.3.v@3
+TARGET: mr.3.v
+PARAM
+INTERNAL: mr.3.v@3
+PARAM
+INTERNAL: mr.3.x@1
+PARAM
+TARGET: mr.3.x
+COPY: <-
+TARGET: mr.3.y
+COPY: <-
+INTERNAL: mr.3.g
+INTERNAL: mr.3.x
+============================================================
+TEST: only a parameter
+TARGET: mr.4.k
+COPY: <-
+TARGET: mr.4.n@1
+TARGET: mr.4.n
+PARAM
+INTERNAL: mr.4.n@1
+PARAM
+============================================================
+TEST 1: inline code
+============================================================
+============================================================
