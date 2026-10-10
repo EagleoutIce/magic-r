@@ -413,6 +413,7 @@ export function libraryEntries(answer) {
 }
 
 export const LABEL_MARK = /^## magic-r label (\S+)\s*$/;
+export const SCOPE_MARK = /^## magic-r scope (\S+)\s*$/;
 export const REQUEST_MARK = /^## magic-r request (\{.*\})\s*$/;
 
 /** the block a request names, by its label or id (the last one of that label), none for the document */
@@ -425,11 +426,13 @@ export function parseCode(code) {
 	const blocks = [], requests = [];
 	let cur;
 	code.split(/\r?\n/).forEach(line => {
-		const m = BLOCK_MARK.exec(line), label = LABEL_MARK.exec(line), req = REQUEST_MARK.exec(line);
+		const m = BLOCK_MARK.exec(line), label = LABEL_MARK.exec(line), req = REQUEST_MARK.exec(line), scope = SCOPE_MARK.exec(line);
 		if(m) {
 			blocks.push(cur = { id: m[1], lines: [] });
 		} else if(label && cur) {
 			cur.label = label[1];
+		} else if(scope && cur) {
+			cur.scope = scope[1];
 		} else if(req) {
 			try {
 				requests.push(JSON.parse(req[1]));
@@ -445,42 +448,66 @@ export function parseCode(code) {
 
 const ANALYSIS = [{ type: 'dependencies' }, { type: 'location-map' }, { type: 'dataflow' }];
 
+/** the blocks grouped by their scope (key mrscope), in the order the scopes first appear */
+export function scopesOf(blocks) {
+	const groups = new Map();
+	for(const b of blocks) {
+		const key = b.scope ?? '';
+		if(!groups.has(key)) {
+			groups.set(key, []);
+		}
+		groups.get(key).push(b);
+	}
+	return [...groups.values()];
+}
+
 /**
- * The loads of all blocks as one script. flowR answers nothing for code that does not parse, so a
- * sentinel load at the end tells; then every block is analyzed on its own and broken ones skipped.
+ * The loads of all blocks, each scope (key mrscope) as one script, so a scope does not see the
+ * definitions of another. flowR answers nothing for code that does not parse, so a sentinel load at
+ * the end tells; then every block of that scope is analyzed on its own and broken ones skipped.
  * Each analysis is a unit: its answer, and where a line of its file is (block and line).
  */
 export function detectWithFlowr(repl, blocks, dir) {
 	const sentinel = `library(${SENTINEL})`;
-	const map = [];
-	const lines = [];
-	for(const b of blocks) {
-		lines.push(`## magic-r block ${b.id}`);
-		b.lines.forEach((l, i) => {
-			lines.push(l);
-			map[lines.length] = [b.id, i + 1];
-		});
+	const scopes = scopesOf(blocks).map((group, s) => {
+		const map = [], lines = [];
+		for(const b of group) {
+			lines.push(`## magic-r block ${b.id}`);
+			b.lines.forEach((l, i) => {
+				lines.push(l);
+				map[lines.length] = [b.id, i + 1];
+			});
+		}
+		const file = s === 0 ? 'doc.R' : `doc${s}.R`;
+		fs.writeFileSync(path.join(dir, file), `${lines.join('\n')}\n${sentinel}\n`);
+		return { group, map, lines, file };
+	});
+	const entries = [], skipped = [], units = [], broken = [];
+	repl.exec(scopes.map(sc => repl.query(ANALYSIS, dir, sc.file)), dir).forEach((answer, s) => {
+		const { group, map, lines } = scopes[s];
+		const whole = libraryEntries(answer);
+		if(whole.some(e => e.pkg === SENTINEL)) {
+			entries.push(...whole.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: map[e.line] })));
+			units.push({ answer, at: l => map[l], source: l => lines[l - 1], ids: group.map(b => b.id) });
+		} else {
+			broken.push(...group);
+		}
+	});
+	if(broken.length === 0) {
+		return { entries, skipped, units };
 	}
-	fs.writeFileSync(path.join(dir, 'doc.R'), `${lines.join('\n')}\n${sentinel}\n`);
-	const answer = repl.exec([repl.query(ANALYSIS, dir, 'doc.R')], dir)[0];
-	const whole = libraryEntries(answer);
-	if(whole.some(e => e.pkg === SENTINEL)) {
-		const unit = { answer, at: l => map[l], source: l => lines[l - 1], ids: blocks.map(b => b.id) };
-		return { entries: whole.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: map[e.line] })), skipped: [], units: [unit] };
-	}
-	const cmds = blocks.map((b, i) => {
+	const cmds = broken.map((b, i) => {
 		fs.writeFileSync(path.join(dir, `b${i}.R`), `${b.lines.join('\n')}\n${sentinel}\n`);
 		return repl.query(ANALYSIS, dir, `b${i}.R`);
 	});
-	const entries = [], skipped = [], units = [];
 	repl.exec(cmds, dir).forEach((a, i) => {
 		const es = a ? libraryEntries(a) : [];
+		const b = broken[i];
 		if(es.some(e => e.pkg === SENTINEL)) {
-			const b = blocks[i];
 			entries.push(...es.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: e.line ? [b.id, e.line] : undefined })));
 			units.push({ answer: a, at: l => l <= b.lines.length ? [b.id, l] : undefined, source: l => b.lines[l - 1], ids: [b.id] });
 		} else {
-			skipped.push(blocks[i].id);
+			skipped.push(b.id);
 		}
 	});
 	return { entries, skipped, units };

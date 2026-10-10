@@ -499,6 +499,13 @@ it changed, the script \TT{magic-r-flowr.mjs} (needs \TT{node}) asks flowR at th
 writes the answer to \TT{\textbackslash jobname.mr.cfg} for the next run. If flowR cannot run, a
 warning says why and \cref{sec:plain} still applies. The key \key[flowr]{mrcapture}\TT{=false} keeps a listing from flowR.
 
+flowR analyzes the listings of the document as one program, so a definition in one listing reaches
+all later ones, and so does a listing that rebinds \code|<-| or \code|function|. The key
+\key[flowr]{mrscope}\TT{=name} puts a listing into a scope of its own. flowR analyzes each scope as a
+separate program, and the listings without a scope form the default one.
+\cmd[flowr]{mrScope}\TT{\{name\}} sets the scope of all listings that follow, and \cmd[flowr]{mrScope}\TT{\{\}}
+returns to the default. A name has no spaces.
+
 \subsection{Choosing a Backend}\label{sec:backends}
 magic-r uses the first of these backends that works, or the one the option \TT{flowr-backend} sets:
 \begin{description}

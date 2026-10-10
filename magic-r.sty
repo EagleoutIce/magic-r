@@ -1087,6 +1087,10 @@
                 \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~block~\int_use:N \mr@lstid }
                 \tl_if_empty:NF \l__mr_label_tl
                   { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~label~ \tl_to_str:N \l__mr_label_tl } }
+                \tl_if_empty:NTF \l__mr_scope_tl
+                  { \tl_if_empty:NF \g__mr_scope_tl
+                      { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~scope~ \tl_to_str:N \g__mr_scope_tl } } }
+                  { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~scope~ \tl_to_str:N \l__mr_scope_tl } }
               }
             \group_begin:
             \__mr_line_text:
@@ -1226,6 +1230,12 @@
 % the label of a listing (key mrname) names its block for the queries below
 \tl_new:N \l__mr_label_tl
 \lst@Key { mrname } { } { \tl_set:Nn \l__mr_label_tl {#1} \def\mr@lstlabel@{#1} }
+% the scope of a listing (key mrscope, \mrScope{name} for the listings that follow, \mrScope{} back
+% to the default): flowR analyzes the listings of each scope as one program, apart from the others
+\tl_new:N \l__mr_scope_tl
+\tl_new:N \g__mr_scope_tl
+\lst@Key { mrscope } { } { \tl_set:Nn \l__mr_scope_tl {#1} }
+\NewDocumentCommand \mrScope { m } { \tl_gset:Nn \g__mr_scope_tl {#1} }
 % #1 JSON of a request, answered in the next run; requests are lines of the code file
 \cs_new_protected:Npn \__mr_request:n #1
   {

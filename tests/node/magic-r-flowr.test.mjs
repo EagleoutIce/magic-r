@@ -116,6 +116,19 @@ test('blocks of the code', () => {
 	assert.deepEqual(blocks, [{ id: '0', lines: ['x'] }, { id: '3', lines: ['a', '', 'b'] }, { id: '7', lines: ['c'] }]);
 });
 
+test('scopes split the blocks into programs', () => {
+	const blocks = m.parseCode('## magic-r block 1\na\n## magic-r block 2\n## magic-r scope s\nb\n## magic-r block 3\nc\n## magic-r block 4\n## magic-r scope s\nd').blocks;
+	assert.deepEqual(blocks.map(b => [b.id, b.scope]), [['1', undefined], ['2', 's'], ['3', undefined], ['4', 's']]);
+	assert.deepEqual(m.scopesOf(blocks).map(g => g.map(b => b.id)), [['1', '3'], ['2', '4']]);
+});
+
+test('each scope is analyzed as a program of its own', async() => {
+	const out = await document('## magic-r block 1\nlibrary(dplyr)\n## magic-r block 2\n## magic-r scope other\nrequire(magrittr)\n## magic-r block 3\nx <- 1\n');
+	assert.match(out, /\\mrLoad\{1\}\{1\}\{dplyr\}/);
+	assert.match(out, /\\mrLoad\{2\}\{1\}\{magrittr\}/);
+	assert.match(out, /\\mrFlowBlocks\{1,3,2\}/);
+});
+
 test('the plain scan finds loads', () => {
 	const { entries } = m.detectByScan(m.parseCode([
 		'## magic-r block 1', 'library(dplyr); require("tidyr") # library(no)',
