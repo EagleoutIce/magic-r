@@ -29,4 +29,4 @@ for run in 1 2; do
       -interaction=nonstopmode doc.tex > /dev/null 2>&1 || { echo "layout: pdflatex run $run failed or hung"; tail -n 30 build/doc.log; exit 1; }
 done
 grep -q 'mrFlowrStatus{ok}' build/doc.mr.cfg || { echo "layout: flowR did not answer"; head -n 3 build/doc.mr.cfg; exit 1; }
-echo "layout: ok ($(sed -n 's/.*mrFlowrStatus{ok}{\(.*\)}.*/\1/p' build/doc.mr.cfg))"
+printf '%s\n' "layout: ok ($(sed -n 's/.*mrFlowrStatus{ok}{\(.*\)}.*/\1/p' build/doc.mr.cfg))"

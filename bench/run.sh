@@ -5,6 +5,7 @@
 # The flowR column needs a backend of flowR (see magic-r-flowr.mjs), without
 # one it stays empty; MR_BENCH_FLOWR_OPTIONS passes options to the script.
 set -eu
+# printf, not echo: the echo of dash (sh on Ubuntu) reads '\b' of '\begin' as a backspace
 cd "$(dirname "$0")/.."
 
 runs=${MR_BENCH_RUNS:-5}
@@ -18,7 +19,7 @@ now() {
    t=$(date +%s%N)
    case $t in
       *[!0-9]* | ?????????? ) perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1e9' ;;
-      *) echo "$t" ;;
+      *) printf '%s\n' "$t" ;;
    esac
 }
 # tenths of a ms as milliseconds for siunitx
@@ -53,13 +54,13 @@ measure() {
          "\\def\\mrbenchruns{$runs}\\def\\mrbenchlines{$1}\\def\\mrbenchvariant{$2}\\def\\mrbenchflowr{$flowr}\\def\\mrbenchflowropts{${MR_BENCH_FLOWR_OPTIONS:-}}\\input{bench/measure.tex}" \
          < /dev/null > bench/measure.stdout 2>&1
       then
-         echo "bench: $1 lines ($2, pass $pass) failed, last lines of bench/measure.log:" >&2
+         printf '%s\n' "bench: $1 lines ($2, pass $pass) failed, last lines of bench/measure.log:" >&2
          tail -n 40 bench/measure.log >&2 || tail -n 40 bench/measure.stdout >&2
          exit 1
       fi
       [ "$pass" = 1 ] && helper=$(( ($(now) - start) / 100000 ))
    done
-   echo "$(cat bench/bench-stat.txt)|$helper"
+   printf '%s\n' "$(cat bench/bench-stat.txt)|$helper"
 }
 
 : > "$rows"
@@ -69,27 +70,27 @@ grep -ve '^#' -e '^$' bench/cases.txt | while IFS='|' read -r lines label; do
    m=$(measure "$lines" magic-r off)
    d=$(measure "$lines" definitions off)
    f=$(measure "$lines" flowr always)
-   avg() { echo "$1" | cut -d'|' -f1; }
+   avg() { printf '%s\n' "$1" | cut -d'|' -f1; }
    # flowR answered if its answer has facts
    if grep -q '^\\mrFlowBlocks' bench/measure.mr.cfg 2>/dev/null; then
-      flowr="$(ms "$(avg "$f")") & $(ms "$(echo "$f" | cut -d'|' -f4)")"
+      flowr="$(ms "$(avg "$f")") & $(ms "$(printf '%s\n' "$f" | cut -d'|' -f4)")"
    else
       flowr="n/a & n/a"
    fi
-   echo "   $label & $lines & $(ms "$(avg "$x")") & $(ms "$(avg "$m")") & $(ms "$(avg "$d")") & $flowr \\\\" >> "$rows"
+   printf '%s\n' "   $label & $lines & $(ms "$(avg "$x")") & $(ms "$(avg "$m")") & $(ms "$(avg "$d")") & $flowr \\\\" >> "$rows"
 done
 
 {
-   echo '% written by bench/run.sh, do not edit'
-   echo '\begin{tabular}{@{}lrrrrrr@{}}'
-   echo '   \toprule'
-   echo '   \textbf{Case} & \textbf{Lines} & \textbf{xlistings} & \textbf{magic-r} & \textbf{+ definitions} & \textbf{+ flowR} & \textbf{first run with flowR} \\'
-   echo '   \midrule'
+   printf '%s\n' '% written by bench/run.sh, do not edit'
+   printf '%s\n' '\begin{tabular}{@{}lrrrrrr@{}}'
+   printf '%s\n' '   \toprule'
+   printf '%s\n' '   \textbf{Case} & \textbf{Lines} & \textbf{xlistings} & \textbf{magic-r} & \textbf{+ definitions} & \textbf{+ flowR} & \textbf{first run with flowR} \\'
+   printf '%s\n' '   \midrule'
    cat "$rows"
-   echo '   \bottomrule'
-   echo '\end{tabular}'
+   printf '%s\n' '   \bottomrule'
+   printf '%s\n' '\end{tabular}'
 } > "$out.new"
 mv "$out.new" "$out"
 rm -f "$rows" bench/bench-stat.txt bench/sample-*.R
 for ext in aux log out pdf stdout mr.R mr.cfg; do rm -f "bench/measure.$ext"; done
-echo "wrote $out"
+printf '%s\n' "wrote $out"

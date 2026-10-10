@@ -871,3 +871,13 @@ test('a session of flowR\'s REPL: each input with what flowR prints for it', () 
 test('the output of a session is ASCII, which listings reads', () => {
 	assert.equal(m.ascii('   ╰ Unused (≈3 ms) → x ü'), '   + Unused (~3 ms) -> x ?');
 });
+
+test('the shell scripts write backslashes with printf, not echo (dash, sh on Ubuntu, reads \\b as a backspace)', () => {
+	const root = path.join(here, '..', '..');
+	for(const file of ['bench/run.sh', 'tools/layout-test.sh']) {
+		fs.readFileSync(path.join(root, file), 'utf8').split('\n').forEach((line, i) => {
+			const code = line.replace(/^\s*#.*$/, '');
+			assert.ok(!/\becho\b[^|;]*\\/.test(code), `${file}:${i + 1} gives echo a backslash: ${line.trim()}`);
+		});
+	}
+});
