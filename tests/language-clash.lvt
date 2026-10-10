@@ -1,0 +1,14 @@
+% A language name whose commands exist already is refused: 'r' would make \cr
+% the inline command of R, and every tabular would break. magic-r takes 'mr'.
+\input{regression-test}
+\documentclass{article}
+\input{mrmessages}
+\usepackage[database=testlinks,flowr=off,language=r]{magic-r}
+\usepackage{mrtest}
+\begin{document}
+\WarmUp
+\START
+\ShowMessages
+\TEST{tabular still works}{\Typeset{\begin{tabular}{l}a\\b\end{tabular}}}
+\TEST{the language is mr}{\TYPE{LANGUAGE: \mrLanguage}\Typeset{\bmr{x <- 1}}}
+\END

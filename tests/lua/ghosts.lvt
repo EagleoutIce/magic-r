@@ -1,0 +1,42 @@
+% No macro of magic-r may leave a space in the typeset code. The code here has
+% no spaces of its own, and a space typesets as \spaceskip, which is 1000pt, so
+% every glue of 1000pt in the box of the code is a ghost.
+\input{regression-test}
+\documentclass{article}
+\usepackage[database=testlinks,flowr=off]{magic-r}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\directlua{dofile(kpse.find_file("ghosts.lua"))}
+\newbox\ghostbox
+\newcommand\Ghosts[1]{\TYPE{GHOSTS: #1: \directlua{tex.print(ghosts.count(\the\ghostbox))}}}
+% #1 code without spaces, typeset inline
+\newcommand\Inline[1]{\setbox\ghostbox\hbox{\spaceskip=1000pt\relax\bmr{#1}}\Ghosts{\detokenize{#1}}}
+\begin{document}
+\WarmUp
+\START
+\TEST{inline}{%
+  \Inline{f<-function(df,col){nrow(df[col])}}%
+  \Inline{g<-function(x){h<-function(y)x+y;sapply(x,function(v)v*x)}}%
+  \Inline{library(stats);mtcars|>subset(cyl>4)}%
+  \Inline{x<-"a";y=c(1,2);z<<-x[[1]];x->>w}%
+  \Inline{`a`<-1;x@z;-x;!y}%
+  \Inline{if(x){y}else{z};while(TRUE)break}%
+  \Inline{f(a=1,b=)}%
+}
+\SEPARATOR
+\setbox\ghostbox\vbox{\hsize=400pt \spaceskip=1000pt\relax
+\begin{mr}
+f<-function(df,col){nrow(df[col])}
+df<-data.frame(a=1)
+f(df,"a")
+g<-function(x){
+h<-function(y)x+y
+sapply(x,\(v)v*x)
+}
+library(stats);mtcars|>subset(cyl>4)
+x<-"a";y=c(1,2);z<<-x[[1]];x->>w
+`a`<-1;x$y;x@z;a%in%b;-x;!y
+if(x){y}else{z}#comment
+\end{mr}}
+\Ghosts{displayed}
+\END

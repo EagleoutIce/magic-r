@@ -31,6 +31,14 @@ jobs:
       - name: '✅ Test the flowR bridge'
         run: node --test tests/node
 
+      # the oldest xlistings magic-r supports (\mr@xlistings@min in magic-r.sty, v1.0.0 of 2026/08/17)
+      - name: '✅ Run the test suite with the oldest supported xlistings'
+        run: |
+          git -C xlistings fetch --depth 1 origin e45cc1091f795934671d8ead041e9c4da63baf6d
+          git -C xlistings checkout --detach e45cc1091f795934671d8ead041e9c4da63baf6d
+          l3build check
+          git -C xlistings checkout --detach -
+
       - name: '🔍 Upload the test output for inspection'
         if: failure()
         uses: actions/upload-artifact@v7
@@ -38,6 +46,7 @@ jobs:
           name: test-output
           path: |
             /tmp/magic-r/test/*.log
+            /tmp/magic-r/test-config-lua/*.log
             /tmp/magic-r/test/*.diff
           if-no-files-found: ignore
 

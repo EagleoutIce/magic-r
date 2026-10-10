@@ -1,0 +1,57 @@
+% Loading magic-r into a document that sets up xlistings itself: an xlistings
+% that is loaded already is used as it is (the option xlistings has no
+% effect), and a later \LoadLanguage{R} does not replace the language of
+% magic-r. Escapes of other kinds than the default escapeinside work, and
+% \mrSetStyle sets the styles of names.
+\input{regression-test}
+\documentclass{article}
+\usepackage{xlistings}
+\input{mrmessages}
+\usepackage[database=testlinks,flowr=off,language=R,xlistings={style=plain}]{magic-r}
+\LoadLanguage{R}
+\usepackage{hyperref}
+\usepackage{mrtest}
+\mrSetStyle{argument}{\typeout{STYLE: argument}}
+\mrSetStyle{user}{\typeout{STYLE: user}}
+\mrSetStyle{variable}{\typeout{STYLE: variable}}
+\mrSetStyle{parameter}{\typeout{STYLE: parameter}}
+\mrSetStyle{package}{\typeout{STYLE: package}}
+\mrSetStyle{nosuchstyle}{}
+\begin{document}
+\WarmUp
+\START
+\ShowMessages
+\TEST{the inline command is the one of magic-r}{\TYPE{\meaning\cR}}
+\BeginBox{styles}
+\begin{R}
+f <- function(n) n
+y <- f(n = 1)
+library(stats)
+\end{R}
+\EndBox
+\BeginBox{escapeinside={@}{@}}
+\begin{R}[escapeinside={@}{@}]
+x <- @\textit{one}@ + 1
+\end{R}
+\EndBox
+\BeginBox{escapechar}
+\begin{R}[escapechar=|]
+x <- |\textit{one}| + 1
+\end{R}
+\EndBox
+\BeginBox{mathescape}
+\begin{R}[mathescape]
+x <- 1 # $\alpha$
+\end{R}
+\EndBox
+\BeginBox{texcl}
+\begin{R}[texcl]
+x <- 1 # \textit{one}
+\end{R}
+\EndBox
+\BeginBox{the default escape}
+\begin{R}
+x <- !*\textit{one}*! + 1
+\end{R}
+\EndBox
+\END

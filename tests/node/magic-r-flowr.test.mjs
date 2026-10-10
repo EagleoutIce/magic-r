@@ -232,7 +232,13 @@ test('backends: an explicit one, and auto without anything', () => {
 	assert.deepEqual(docker.prefix('/tmp/a'), ['docker', 'run', '/tmp/a']);
 });
 
-test('generate writes a database for a list of packages', async() => {
+// the pages of the link check, without the network: `pages` answer 200, all others 404
+function stubFetch(t, pages = null) {
+	t.mock.method(globalThis, 'fetch', async url => ({ status: !pages || pages.has(url) ? 200 : 404 }));
+}
+
+test('generate writes a database for a list of packages', async t => {
+	stubFetch(t);
 	const dir = tmp();
 	fs.writeFileSync(path.join(dir, 'list.txt'), '# comment\nbase dplyr\nmagrittr\n');
 	await m.generateCommand(opts({ output: path.join(dir, 'out.cfg') }), [path.join(dir, 'list.txt')]);
@@ -261,6 +267,34 @@ test('pruning drops the names of dead pages', () => {
 	assert.deepEqual([...m.databaseUrls(pruned).values()].flat(), ['pkg::alive', 'pkg::a', 'pkg::b']);
 	assert.match(pruned, /\\mrOperators\{\}\n$/);
 	assert.equal(m.prune(text, new Set()), text);
+});
+
+test('pruning moves names to their fallback page', () => {
+	const text = m.packageEntry('pkg', '1.0', [{ name: 'a', topic: 'gone' }, { name: 'b', topic: 'gone' }]) + '\n\\mrOperators{}\n';
+	const pruned = m.prune(text, new Set(['https://rdrr.io/cran/pkg/man/gone.html']), new Map([['pkg::a', 'https://example.org/a.html']]));
+	assert.deepEqual([...m.databaseUrls(pruned)], [['https://example.org/a.html', ['pkg::a']]]);
+	assert.match(pruned, /\\U\{https:\/\/example\.org\/a\.html\}\{a,\}%/);
+});
+
+test('fallback pages of a dead page', () => {
+	assert.deepEqual(m.fallbackUrls('cran', 'pkg', 'https://rdrr.io/cran/pkg/man/topic.html', 'f'), [
+		'https://rdrr.io/cran/pkg/man/f.html',
+		'https://search.r-project.org/CRAN/refmans/pkg/html/topic.html',
+		'https://search.r-project.org/CRAN/refmans/pkg/html/f.html'
+	]);
+	assert.deepEqual(m.fallbackUrls('rman', 'stats', 'https://stat.ethz.ch/R-manual/R-devel/library/stats/html/f.html', 'f'),
+		['https://search.r-project.org/R/refmans/stats/html/f.html']);
+});
+
+test('the link check moves or drops the names of dead pages', async t => {
+	stubFetch(t, new Set(['https://rdrr.io/cran/pkg/man/ok.html', 'https://search.r-project.org/CRAN/refmans/pkg/html/gone.html']));
+	const text = m.packageEntry('pkg', '1.0', [{ name: 'ok', topic: 'ok' }, { name: 'a', topic: 'gone' }, { name: 'lost', topic: 'lost' }]) + '\n\\mrOperators{}\n';
+	const r = await m.checkLinks(text, () => {});
+	assert.deepEqual([r.checked, r.failed, r.moved], [3, 2, 1]);
+	assert.deepEqual([...m.databaseUrls(r.text)], [
+		['https://rdrr.io/cran/pkg/man/ok.html', ['pkg::ok']],
+		['https://search.r-project.org/CRAN/refmans/pkg/html/gone.html', ['pkg::a']]
+	]);
 });
 
 // a dataflow answer of flowR for: f <- function(x) x / p <- "a" / library(p, character.only = TRUE) / f(p)

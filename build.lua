@@ -82,6 +82,7 @@ end
 testfiledir = "tests"
 testsuppdir = testfiledir .. "/support"
 checkengines = {"pdftex"}
+checkconfigs = {"build", "config-lua"}  -- config-lua: the tests that need LuaTeX
 stdengine = "pdftex"
 checkruns = 3  -- definitions and named arguments come from the aux file
 function checkinit_hook() return copy_xlistings(testdir) end

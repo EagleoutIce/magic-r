@@ -1,0 +1,54 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+WARNING: xlistings is loaded already, so the option xlistings={style=plain} has no effect. Give the options to xlistings itself
+ERROR: No style 'nosuchstyle'
+WARNING: The language 'R' was registered again after magic-r, e.g. by \LoadLanguage{R}. magic-r registers its own once more
+============================================================
+TEST 1: the inline command is the one of magic-r
+============================================================
+\protected macro:->\mr@verbatim \mr@inline@c 
+============================================================
+============================================================
+TEST: styles
+TARGET: mr.2.f
+STYLE: user
+COPY: <-
+TARGET: mr.2.n@1
+TARGET: mr.2.n
+STYLE: parameter
+INTERNAL: mr.2.n@1
+STYLE: parameter
+TARGET: mr.2.y
+STYLE: variable
+COPY: <-
+INTERNAL: mr.2.f
+STYLE: user
+STYLE: argument
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+STYLE: package
+============================================================
+TEST: escapeinside={@}{@}
+TARGET: mr.3.x
+STYLE: variable
+COPY: <-
+============================================================
+TEST: escapechar
+TARGET: mr.4.x
+STYLE: variable
+COPY: <-
+============================================================
+TEST: mathescape
+TARGET: mr.5.x
+STYLE: variable
+COPY: <-
+============================================================
+TEST: texcl
+TARGET: mr.6.x
+STYLE: variable
+COPY: <-
+============================================================
+TEST: the default escape
+TARGET: mr.7.x
+STYLE: variable
+COPY: <-

@@ -1,0 +1,11 @@
+% mrmessages.tex: keeps the warnings and errors of magic-r in the preamble,
+% which comes before \START, and \ShowMessages writes them to the log.
+\makeatletter
+\def\mrtest@msgs{}
+\def\mrtest@keep#1#2#3{\def\mrtest@t{#2}\def\mrtest@m{magic-r}\ifx\mrtest@t\mrtest@m
+  \begingroup\def\MessageBreak{ }\protected@xdef\mrtest@msgs{\unexpanded\expandafter{\mrtest@msgs}\noexpand\TYPE{#1: #3}}\endgroup\fi}
+\let\mrtest@warning\PackageWarning
+\def\PackageWarning#1#2{\mrtest@keep{WARNING}{#1}{#2}\mrtest@warning{#1}{#2}}
+\def\PackageError#1#2#3{\mrtest@keep{ERROR}{#1}{#2}}
+\def\ShowMessages{\mrtest@msgs\gdef\mrtest@msgs{}}
+\makeatother

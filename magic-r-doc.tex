@@ -292,10 +292,16 @@ The language is called \TT{mr}, so there is an environment \env{mr}, the inline 
 \cmd{bmr}, and \TT{\textbackslash begin\{minted\}\{mr\}} (see \pkg{xlistings} for all of them).
 flowR and R need \TT{-shell-escape} and only run when their input changed. Without it, the package
 warns, prints the command to run by hand, and the answers show \textbf{??}.
+A copy of the package in a folder of the project needs no change of \TT{TEXINPUTS}: with
+\code|\usepackage{_config/magic-r/magic-r}| it finds its database and its script beside it.
 
 \subsection{Package Options}\label{sec:options}
 \begin{description}
-\item \option{language}{mr} the name of the language, \TT{language=R} replaces the R of \pkg{xlistings}.
+\item \option{language}{mr} the name of the language, \TT{language=R} replaces the R of \pkg{xlistings}
+  (a later \code|\LoadLanguage{R}| does not, magic-r warns and registers its own again). A name
+  whose inline commands exist already is an error, \TT{language=r} would turn \TT{\textbackslash cr}
+  into inline code and break every table, so magic-r takes \TT{mr} instead. For minted, \TT{R} and
+  \TT{r} are aliases.
 \item \option{links}{true}, \option{underline}{true} link names, and underline the links slightly
   (in the color \TT{mrlink}). \cmd{mrLinksOn}, \cmd{mrLinksOff}, \cmd{mrUnderlineOn}, and
   \cmd{mrUnderlineOff} switch them anywhere, the key \key{mrlinks}\TT{=false} for one listing.
@@ -338,6 +344,9 @@ warns, prints the command to run by hand, and the answers show \textbf{??}.
   \TT{mrinteractive}), \TT{interactive=all} makes every listing so (\cref{sec:arrows}).
 \item \option[r]{eval}{false} let R compute values and sessions (\cref{sec:r}).
 \item \option{xlistings}{} options for \pkg{xlistings}, e.g.\ \TT{xlistings=\{style=\{plain number\}\}}.
+  They only count when magic-r loads \pkg{xlistings}. A document that loads \pkg{xlistings} itself
+  (also by its path) may do so before or after magic-r, magic-r uses it as it is. magic-r needs
+  \pkg{xlistings} 2026/08/17 or later and warns about an older one.
 \end{description}
 
 \section{Linking without flowR}\label{sec:plain}
@@ -382,6 +391,9 @@ the definition and keeps its color. Functions (\bmr{f <- function(x)}, \expandaf
 functions of packages, variables keep the color of the code, and parameters get the color
 \TT{mrparam} (a shade of the color of packages, \code|\colorlet{mrparam}{...}| after
 \TT{\textbackslash begin\{document\}} changes it). An indented assignment only counts within its listing.
+\cmd{mrSetStyle}\TT{\{kind\}\{style\}} sets the style of a kind of name: \TT{function} (of packages),
+\TT{user} (functions of the document), \TT{variable}, \TT{parameter}, \TT{package}, \TT{operator}, and
+\TT{argument} (\bmr{n} in \bmr{head(x, n = 3)}, plain by default), e.g.\ \code|\mrSetStyle{user}{\color{gray}}|.
 The key \key{mrdefinitions} switches this off (\TT{false}) or keeps all definitions of a listing
 local (\TT{local}). Definitions come from the aux file, so they need a second run, as references do.
 \begin{mrdemo}
@@ -698,6 +710,9 @@ The code keeps its indentation. This manual has the option on, \TT{mrplayground=
 for a listing. By default the button is a thin gray ring,
 \cmd[flowr]{mrPlayStyle}\TT{\{filled\}} (as in this manual, with \TT{mrplay} a blue) a disc. The color
 \TT{mrplay} and \cmd[flowr]{mrPlaySize} change it, redefining \cmd[flowr]{mrPlayButton} replaces it.
+The button sits \cmd[flowr]{mrPlayOffset} (\TT{.6em}) right of the text. A negative offset moves it
+into the text, e.g.\ \code|\renewcommand\mrPlayOffset{-3em}| left of the badge of \pkg{xlistings}.
+Redefining \cmd[flowr]{mrPlaceButton}\TT{\{button\}} puts it anywhere, and the link moves with it.
 
 \subsection{Requesting flowR Queries}
 \backends{node,docker,r} \cmd[flowr]{mrFlowrQuery}\TT{[block=label,path=/json/pointer]\{name\}\{query\}} asks flowR
@@ -770,7 +785,10 @@ summary(x > 10)
 \item code that even the lax parser cannot read falls back to the rules without flowR,
 \item a listing with \TT{mrslicemode=hide} shows all of its code again once, after its code changed,
 \item a listing with arrows is not broken across pages,
-\item \backend{web} only knows packages: no names, lines, slices, graphs, or queries.
+\item \backend{web} only knows packages: no names, lines, slices, graphs, or queries,
+\item flowR only sees the text of the escapes of the default \TT{escapeinside=\{!*\}\{*!\}}. Other
+  escapes (another \TT{escapeinside}, \TT{escapechar}, \TT{mathescape}, \TT{texcl}) work, but marks
+  right of them in the same line can be off.
 \end{itemize}
 \needsr{} R runs all queries of a run in one session. A query that never ends stops all of them.
 
@@ -794,13 +812,16 @@ The table lists each package with its version, its documentation (\textsuperscri
 \textsuperscript{C} rdrr.io), and the number of names that link.
 
 \TT{generate} builds the database from \TT{tools/packages.txt}: names from flowR's signature
-database, help topics from R's help index, versions from the installed packages. \TT{verify}
-requests every linked page and lists the ones that fail (rdrr.io can lag behind CRAN), \TT{--prune}
-drops their names. A weekly job of the repository verifies the database.
+database, help topics from R's help index, versions from the installed packages. It requests every
+linked page, and a name whose page fails moves to the first page that works (the page of its own
+name, then \href{https://search.r-project.org}{search.r-project.org}) or is dropped. \TT{verify}
+requests every page of a database and lists the ones that fail (rdrr.io can lag behind CRAN),
+\TT{--prune} moves or drops their names as \TT{generate} does. A weekly job of the repository
+verifies the database.
 \begin{bash}
 node magic-r-flowr.mjs generate        # tools/packages.txt -> magic-r-links.cfg
 node magic-r-flowr.mjs verify          # lists the pages that fail
-node magic-r-flowr.mjs verify --prune  # ... and drops their names
+node magic-r-flowr.mjs verify --prune  # ... and moves or drops their names
 \end{bash}
 \begin{center}\small
 \begin{longtable}{@{}l@{\enspace}lr@{\qquad}l@{\enspace}lr@{\qquad}l@{\enspace}lr@{}}

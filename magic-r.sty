@@ -38,7 +38,20 @@
 \ProcessKeyvalOptions*
 \let\mrLanguage\mr@language
 
-\expandafter\RequirePackage\expandafter[\mr@xlistings]{xlistings}
+% the directory of magic-r when a document loads it by its path ('_config/magic-r/magic-r'),
+% where it finds its database and its script without TEXINPUTS; empty if kpathsea found it
+\edef\mr@dir{\CurrentFilePath}
+\def\mr@ownfile#1{\ifx\mr@dir\@empty#1\else\mr@dir/#1\fi}
+% an xlistings the document loaded already, also by its path, is used as it is
+\def\mr@xlistings@min{2026/08/17}
+\ifdefined\xlstGetStyle
+  \ifx\mr@xlistings\@empty\else\PackageWarning{magic-r}{xlistings is loaded already, so the option
+    xlistings={\mr@xlistings} has no effect. Give the options to xlistings itself}\fi
+\else
+  \expandafter\RequirePackage\expandafter[\mr@xlistings]{xlistings}
+\fi
+\@ifpackagelater{xlistings}{\mr@xlistings@min}{}{\PackageWarning{magic-r}{xlistings is older than
+  \mr@xlistings@min, the oldest version magic-r works with. Update xlistings}}
 \RequirePackage{etoolbox}
 
 % \mr@map\f{text} passes each character of the text to \f, which appends to
@@ -75,6 +88,14 @@
 \def\mr@style@pkg{\xlstGetStyle{keywordB}}%  'dplyr' in 'dplyr::filter' and 'library(dplyr)'
 \def\mr@style@op{\@declaredcolor{mr@colors@prompt}}
 \def\mr@style@plain{\color{mr@plain}}% links keep the color around them
+\def\mr@style@arg{}% the names of named arguments ('n' in 'head(x, n = 3)')
+% \mrSetStyle{kind}{style} sets the style of a kind of name, e.g. \mrSetStyle{user}{\color{gray}}
+\def\mr@stylename@function{func}\def\mr@stylename@variable{var}\def\mr@stylename@parameter{param}
+\def\mr@stylename@package{pkg}\def\mr@stylename@operator{op}\def\mr@stylename@argument{arg}
+\newcommand\mrSetStyle[2]{\edef\mr@t{\ifcsname mr@stylename@#1\endcsname\csname mr@stylename@#1\endcsname\else#1\fi}%
+  \ifcsname mr@style@\mr@t\endcsname\expandafter\def\csname mr@style@\mr@t\endcsname{#2}\else
+  \PackageError{magic-r}{No style '#1'}{The kinds are function, user, variable, parameter, package, operator,
+    and argument}\fi}
 \def\mrPrompt#1{\textcolor{mr@colors@prompt}{#1}}
 \if@xlst@accuspp@available@
 \def\mr@copyas#1#2{\BeginAccSupp{method=escape,ActualText={#1}}#2\EndAccSupp{}}
@@ -188,6 +209,7 @@
   \ifin@\expandafter\mr@colons\mr@token\@nil\else
   \ifx\mr@role\mr@role@pkg\mr@pkgname\mr@token\else
   \mr@scopedword{#1}\fi\fi\fi\fi\fi\fi\fi}
+\def\mr@argword#1{{\mr@style@arg#1}}
 \def\mr@role@flow{flow}\def\mr@role@ext{ext}\def\mr@role@sparam{sparam}
 \def\mr@role@plain{plain}\def\mr@role@pkg{pkg}\def\mr@role@def{def}\def\mr@role{}
 % #1 name, #2 typeset word
@@ -313,8 +335,9 @@
   \ifcsname mr@flow@\the\mr@lstid\endcsname\mr@flowkey
     \ifcsname mr@fl@\mr@flowat\endcsname\expandafter\let\expandafter\mr@flowhit\csname mr@fl@\mr@flowat\endcsname\fi\fi
   \ifmr@member\let\mr@role\mr@role@plain\global\mr@memberfalse\fi
-  \ifcsname mr@arg@\the\mr@lstid @\the\mr@word\endcsname\let\mr@role\mr@role@plain\fi
-  \ifnum\mr@params>\z@\ifnum\mr@depth=\mr@params\ifmr@default\else\mr@paramdef\fi\fi\fi
+  \ifcsname mr@arg@\the\mr@lstid @\the\mr@word\endcsname\let\mr@role\mr@role@plain
+    \let\lst@thestyle\mr@argword\fi% not for a parameter ('na.rm = TRUE' of a function)
+  \ifnum\mr@params>\z@\ifnum\mr@depth=\mr@params\ifmr@default\else\let\lst@thestyle\mr@keyword\mr@paramdef\fi\fi\fi
   \ifnum\mr@rassign=1 \gdef\mr@rassign{0}\ifnum\mr@depth=\z@\mr@localdef{var}\fi\fi
   \ifx\mr@token\mr@kwfunction\gdef\mr@fnstate{1}\else\gdef\mr@fnstate{0}\fi
   \ifx\mr@token\mr@kwassign\ifx\mr@role\@empty\gdef\mr@asgstate{1}\fi\fi
@@ -590,7 +613,7 @@
     \ifnum#1<\mr@lstid\def\mr@below{{#1}{#2}}\fi
   \fi\fi\fi
   \expandafter\mr@scan\fi}
-\let\mr@style@local\mr@style@var
+\def\mr@style@local{\mr@style@var}
 % parameters in a shade of the color of packages, at their definition and every use
 \AtBeginDocument{\colorlet{mrparam}{xlst@colors@lst@keywordB!65!black}}
 \def\mr@style@param{\color{mrparam}}
@@ -623,7 +646,7 @@
 \lst@AddToHook{OutputOther}{\mr@markall}
 
 \lst@Key{magic-r}\relax[t]{\global\advance\mr@lstid\@ne\global\mr@word\z@\global\mr@depth\z@\global\mr@params\z@
-  \global\mr@bdepth\z@\global\mr@fnid\z@\gdef\mr@scopes{}\gdef\mr@bodywait{}
+  \global\mr@bdepth\z@\global\mr@fnid\z@\gdef\mr@scopes{}\gdef\mr@bodywait{}%
   \global\mr@line\z@\global\let\mr@pending\@empty\global\let\mr@rhs\@empty\gdef\mr@libstate{0}%
   \global\mr@linestarttrue\global\let\mr@lastword\relax\global\mr@memberfalse
   \gdef\mr@rassign{0}\gdef\mr@asgstate{0}\global\let\mr@libword\@empty\global\let\mr@lastmark\@empty
@@ -714,7 +737,18 @@
   moredelim=[il][\mr@quietline]{:out:},
   add to literate={:prompt:}{{{\mr@nocopy{\mrPrompt{>}\ }}}}2 {:cont:}{{{\mr@nocopy{\mrPrompt{+}\ }}}}2
 }
-\edef\mr@t{\noexpand\RegisterLanguage[magic-r]{\mrLanguage}{lMagicR}}\mr@t
+% xlistings makes the commands \c<language>, \b<language>, and \i<language> for inline code, so a
+% name that gives a command of LaTeX ('r' gives \cr, which every tabular needs) is refused; a
+% language of xlistings is fine, magic-r replaces it
+\def\mr@t#1{\ifcsname#1\mrLanguage\endcsname\ifcsname xlst@lang@loaded@\mrLanguage\endcsname\else
+  \ifcsname xlst@@minted@\mrLanguage\endcsname\else
+  \PackageError{magic-r}{language=\mrLanguage\space would redefine \expandafter\string\csname#1\mrLanguage\endcsname}
+    {Pick a name that gives no command of LaTeX, as R. magic-r uses the name mr instead}%
+  \def\mrLanguage{mr}\fi\fi\fi}
+\mr@t c\mr@t b\mr@t i\mr@t{}
+% minted's names of R are aliases ('\begin{minted}{r}')
+\def\mr@register{\edef\mr@t{\noexpand\RegisterLanguage[magic-r,R,r]{\mrLanguage}{lMagicR}}\mr@t}
+\mr@register
 \RegisterLanguage{rconsole}{lRConsole}
 % the environments follow the style of xlistings ('style={plain number}'),
 % which xlistings itself only applies to its emulation of minted;
@@ -723,7 +757,8 @@
   \pgfkeysifdefined{/xlst@lst@family/\environName/listing style}
     {\xlst@@NewLstEnv{\environName}{#2}{#1}{#1}}{}\endgroup}
 \def\mr@t{default}\ifx\mr@t\xlst@style@default\else
-  \expandafter\mr@restyle\expandafter{\mrLanguage}{lMagicR}\mr@restyle{rconsole}{lRConsole}\fi
+  \expandafter\mr@restyle\expandafter{\mrLanguage}{lMagicR}\mr@restyle{rconsole}{lRConsole}%
+  \appto\mr@register{\expandafter\mr@restyle\expandafter{\mrLanguage}{lMagicR}}\fi
 % inline code reads its argument verbatim (but for the braces), so '%', '#',
 % '$', and '\' need no escape; within the argument of another command the
 % characters are read already, and '\%', '\#', ... still work there
@@ -733,10 +768,18 @@
 % no thin space of xlistings before the code right after a character, as in '(\bmr{x})'
 \def\mr@verbatim@o#1[#2]#3{\endgroup\ifnum\lastnodetype=\z@{\let\xlst@inline@lead\relax
   \let\xlst@inline@lead@prepare\relax#1[#2]{#3}}\else#1[#2]{#3}\fi}
-\def\mr@t#1{\expandafter\let\csname mr@inline@#1\expandafter\endcsname\csname#1\mrLanguage\endcsname
+\def\mr@inlinewrap#1{\expandafter\let\csname mr@inline@#1\expandafter\endcsname\csname#1\mrLanguage\endcsname
   \expandafter\protected\expandafter\edef\csname#1\mrLanguage\endcsname{\noexpand\mr@verbatim
     \expandafter\noexpand\csname mr@inline@#1\endcsname}}
-\mr@t c\mr@t b\mr@t i
+\mr@inlinewrap c\mr@inlinewrap b\mr@inlinewrap i
+\appto\mr@register{\mr@inlinewrap c\mr@inlinewrap b\mr@inlinewrap i}
+% a later registration of the language (\LoadLanguage{R} with language=R) replaces the one of
+% magic-r: magic-r warns and registers it again
+\expandafter\let\expandafter\mr@registered\csname c\mrLanguage\endcsname
+\AtBeginDocument{\expandafter\ifx\csname c\mrLanguage\endcsname\mr@registered\else
+  \PackageWarning{magic-r}{The language '\mrLanguage' was registered again after magic-r, e.g. by
+    \string\LoadLanguage{\mrLanguage}. magic-r registers its own once more}%
+  \mr@register\fi}
 
 % the colors of the graphs: definitions, calls, values; gray with the option graphs-gray
 \def\mr@graphcolors{\csname ifmr@graphs-gray\endcsname
@@ -866,7 +909,8 @@
 \newcommand\mrGraphLabel[1]{\textcolor{\ifcsname mr@glc@#1\endcsname\csname mr@glc@#1\endcsname\else gray\fi}{\bfseries#1}}
 \def\mr@glc@T{mrsource}\def\mr@glc@F{mrerror}
 
-\InputIfFileExists{\mr@database.cfg}{}{\PackageWarning{magic-r}{No link database '\mr@database.cfg'}}
+\InputIfFileExists{\mr@database.cfg}{}{\InputIfFileExists{\mr@ownfile{\mr@database.cfg}}{}%
+  {\PackageWarning{magic-r}{No link database '\mr@database.cfg'}}}
 
 % flowR: the code of every listing goes to '<jobname>.mr.R', one block per
 % listing; magic-r-flowr.mjs answers in '<jobname>.mr.cfg' with the packages
@@ -1004,7 +1048,16 @@
       }
   }
 \ExplSyntaxOff
-\begingroup\lccode`\~=`\*\lowercase{\endgroup\def\mr@escgrab\fi#1~{\fi\mr@escaped{#1}#1~}}
+% only the escapes of the default 'escapeinside={!*}{*!}' are read: not those of another
+% escapeinside or escapechar, of mathescape (math mode), or of texcl (comments); after an
+% escape of escapeinside, listings ends a conditional ('\fi'), not after one of texcl
+\def\mr@defesc{\lst@Escape{!*}{*!}{}{}}
+\def\mr@escgrab{\futurelet\mr@t\mr@escgrab@fi}
+\def\mr@escgrab@fi{\ifx\mr@t\fi\expandafter\mr@escgrab@skip\else\expandafter\mr@escgrab@if\fi}
+\def\mr@escgrab@skip\fi{\fi\mr@escgrab@if}
+\def\mr@escgrab@if{\let\mr@t\@empty\ifmmode\else\ifnum\lst@mode=\lst@TeXmode\relax
+  \ifx\lst@DefEsc\mr@defesc\let\mr@t\mr@escgrab@\fi\fi\fi\mr@t}
+\begingroup\lccode`\~=`\*\lowercase{\endgroup\def\mr@escgrab@#1~{\mr@escaped{#1}#1~}}
 \ExplSyntaxOn
 \lst@AddToHook { DeInit } { \tl_if_empty:NF \g__mr_line_tl { \__mr_write_line: } }
 
@@ -1460,8 +1513,13 @@
   \fill[white,rounded corners=.4pt](-.13,-.2)--(-.13,.2)--(.22,0)--cycle;}
 \def\mrPlayButton{\ifdefined\tikz\tikz[baseline={(0,-.32em)},x=\mrPlaySize,y=\mrPlaySize]{%
   \csname mr@play@\mr@playstyle\endcsname}\else\textsf{\tiny flowR}\fi}
+% \mrPlaceButton{button} puts the linked button at the first line: \mrPlayOffset right of the
+% text (a negative one moves it into the text, e.g. left of the badge of xlistings); the link has
+% a box of its own, so it is as high as the button, while the line keeps its height
+\def\mrPlayOffset{.6em}
+\newcommand\mrPlaceButton[1]{\rlap{\hspace*{\linewidth}\hspace{\mrPlayOffset}\smash{#1}}}
 \lst@AddToHook{EveryPar}{\ifmr@active\ifnum\mr@line=\z@\ifmr@play
-  \rlap{\smash{\hspace*{\linewidth}\hspace{.6em}\mr@playlink{}{\mrPlayButton}}}\fi\fi\fi}
+  \mrPlaceButton{\hbox{\mr@playlink{}{\mrPlayButton}}}\fi\fi\fi}
 % a rule of the linter links to its page in flowR's wiki (#2 its name there)
 \DeclareRobustCommand*\mrLintRule[2]{\ifdefined\href\colorlet{mr@plain}{.}%
   \href{https://github.com/flowr-analysis/flowr/wiki/\%5BLinting-Rule\%5D-#2}{\color{mr@plain}#1}\else#1\fi}
@@ -1662,11 +1720,20 @@
 \lst@AddToHook{OutputOther}{\global\advance\mr@col\lst@length}
 \ExplSyntaxOn
 \str_new:N \l__mr_md_str
+% the script: through kpathsea, else beside magic-r.sty (\mr@dir)
+\str_new:N \g__mr_script_str
+\file_if_exist:nTF { magic-r-flowr.mjs }
+  { \str_gset:Nn \g__mr_script_str { magic-r-flowr.mjs } }
+  { \file_if_exist:nT { \mr@ownfile { magic-r-flowr.mjs } } { \str_gset:Ne \g__mr_script_str { \mr@ownfile { magic-r-flowr.mjs } } } }
 \cs_new:Npn \__mr_helper_cmd:
   {
-    \sys_if_platform_windows:TF
-      { for~/f~"delims="~\c_percent_str i~in~('kpsewhich~magic-r-flowr.mjs')~do~ \g__mr_node_tl \c_space_tl "\c_percent_str i" }
-      { \g__mr_node_tl \c_space_tl "\c_dollar_str(kpsewhich~magic-r-flowr.mjs)" }
+    \str_if_eq:VnTF \g__mr_script_str { magic-r-flowr.mjs }
+      {
+        \sys_if_platform_windows:TF
+          { for~/f~"delims="~\c_percent_str i~in~('kpsewhich~magic-r-flowr.mjs')~do~ \g__mr_node_tl \c_space_tl "\c_percent_str i" }
+          { \g__mr_node_tl \c_space_tl "\c_dollar_str(kpsewhich~magic-r-flowr.mjs)" }
+      }
+      { \g__mr_node_tl \c_space_tl " \g__mr_script_str " }
     \c_space_tl document \g__mr_helper_opts_tl
     \c_space_tl \c__mr_code_str \c_space_tl \c__mr_answer_str
   }
@@ -1676,12 +1743,13 @@
       {
         \iow_close:N \g__mr_code_iow
         % the answer is stale if the code, the options, or the helper itself changed
-        \str_set:Ne \l__mr_md_str { \file_mdfive_hash:n { \c__mr_code_str } \file_mdfive_hash:n { magic-r-flowr.mjs }
+        \str_set:Ne \l__mr_md_str { \file_mdfive_hash:n { \c__mr_code_str } \file_mdfive_hash:n { \g__mr_script_str }
           \tl_to_str:N \g__mr_helper_opts_tl }
         \file_if_exist:nF { \c__mr_answer_str } { \str_gclear:N \g__mr_flowr_md_str }
         \str_if_eq:VVF \l__mr_md_str \g__mr_flowr_md_str
           {
-            \file_if_exist:nTF { magic-r-flowr.mjs }
+            \str_if_empty:NTF \g__mr_script_str
+              { \str_gset_eq:NN \g__mr_flowr_md_str \l__mr_md_str }
               {
                 \__mr_run:VenVn \g__mr_flowr_run_str { \__mr_helper_cmd: } { flowR } \c__mr_answer_str
                   { \A\\mrFlowrStatus }
@@ -1691,7 +1759,6 @@
                     \msg_warning:nnn { magic-r } { rerun } { flowR }
                   }
               }
-              { \str_gset_eq:NN \g__mr_flowr_md_str \l__mr_md_str }
           }
         \__mr_aux:e { \token_to_str:N \mr@flowr@md { \g__mr_flowr_md_str } }
       }

@@ -1,0 +1,76 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+============================================================
+TEST 1: inline
+============================================================
+INTERNAL: mr.9.f
+COPY: <-
+GHOSTS: f<-function(df,col){nrow(df[col])}: 0
+INTERNAL: mr.9.g
+COPY: <-
+INTERNAL: mr.9.h
+GHOSTS: g<-function(x){h<-function(y)x+y;sapply(x,function(v)v*x)}: 0
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+COPY: |>
+GHOSTS: library(stats);mtcars|>subset(cyl>4): 0
+INTERNAL: mr.9.x
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+COPY: <<-
+INTERNAL: mr.9.x
+INTERNAL: mr.9.x
+COPY: ->>
+INTERNAL: mr.9.w
+GHOSTS: x<-"a";y=c(1,2);z<<-x[[1]];x->>w: 0
+GHOSTS: `a`<-1;x@z;-x;!y: 0
+INTERNAL: mr.9.x
+GHOSTS: if(x){y}else{z};while(TRUE)break: 0
+INTERNAL: mr.9.f
+GHOSTS: f(a=1,b=): 0
+============================================================
+============================================================
+TARGET: mr.9.f
+COPY: <-
+TARGET: mr.9.df@1
+TARGET: mr.9.col@1
+TARGET: mr.9.col
+INTERNAL: mr.9.df@1
+INTERNAL: mr.9.col@1
+TARGET: mr.9.df
+COPY: <-
+INTERNAL: mr.9.f
+INTERNAL: mr.9.df
+TARGET: mr.9.g
+COPY: <-
+TARGET: mr.9.x@2
+TARGET: mr.9.h
+COPY: <-
+TARGET: mr.9.y@3
+TARGET: mr.9.y
+INTERNAL: mr.9.x@2
+INTERNAL: mr.9.y@3
+INTERNAL: mr.9.x@2
+TARGET: mr.9.v@4
+TARGET: mr.9.v
+INTERNAL: mr.9.v@4
+INTERNAL: mr.9.x@2
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html
+COPY: |>
+TARGET: mr.9.x
+COPY: <-
+INTERNAL: mr.9.y
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/c.html
+COPY: <<-
+INTERNAL: mr.9.x
+INTERNAL: mr.9.x
+COPY: ->>
+TARGET: mr.9.w
+COPY: <-
+LINK: https://stat.ethz.ch/R-manual/R-devel/library/base/html/match.html
+INTERNAL: mr.9.x
+INTERNAL: mr.9.y
+INTERNAL: mr.9.x
+INTERNAL: mr.9.y
+GHOSTS: displayed: 0
