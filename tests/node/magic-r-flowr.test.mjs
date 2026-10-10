@@ -1,4 +1,4 @@
-// Tests of magic-r-flowr.mjs: node --test tests/node
+// Tests of magic-r-flowr.mjs: node --test tests/node/*.test.mjs
 // A fake flowR (fake-flowr.mjs) stands in for the real one; with MAGIC_R_FLOWR
 // set, the last tests also run against a real flowR.
 import { test } from 'node:test';

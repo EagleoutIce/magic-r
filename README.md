@@ -31,9 +31,9 @@ Examples are in [`examples/`](examples/).
 latexmk                               # examples and documentation into build/
 l3build check                         # regression tests (no R or flowR needed)
 l3build save NAME                     # update tests/NAME.tlg
-node --test tests/node                # tests of magic-r-flowr.mjs (MAGIC_R_FLOWR=<flowr> adds a real flowR)
+node --test tests/node/*.test.mjs     # tests of magic-r-flowr.mjs (MAGIC_R_FLOWR=<flowr> adds a real flowR)
 node magic-r-flowr.mjs generate       # regenerate magic-r-links.cfg from tools/packages.txt
-node magic-r-flowr.mjs verify --prune # check every documentation link, drop dead ones
+node magic-r-flowr.mjs verify --prune # check every documentation link, move or drop dead ones
 l3build bench                         # benchmark (bench/cases.txt)
 ```
 

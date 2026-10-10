@@ -29,7 +29,7 @@ jobs:
         run: l3build check
 
       - name: '✅ Test the flowR bridge'
-        run: node --test tests/node
+        run: node --test tests/node/*.test.mjs
 
       # the oldest xlistings magic-r supports (\mr@xlistings@min in magic-r.sty, v1.0.0 of 2026/08/17)
       - name: '✅ Run the test suite with the oldest supported xlistings'
@@ -71,7 +71,7 @@ jobs:
           npm install -g @eagleoutice/flowr
 
       - name: '✅ Test the flowR bridge with a real flowR'
-        run: MAGIC_R_FLOWR=flowr node --test tests/node
+        run: MAGIC_R_FLOWR=flowr node --test tests/node/*.test.mjs
 
       - name: '⏱️ Run the benchmark'
         run: l3build bench
