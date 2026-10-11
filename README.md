@@ -17,7 +17,7 @@ mtcars |> filter(cyl > 4) |> summarise(mpg = mean(mpg))
 \end{mr}
 ```
 
-Nothing besides LaTeX is required. The links come from a shipped database of 95 packages.
+Nothing besides LaTeX is required. The links come from a shipped database of 101 packages.
 flowR and R are optional and only run with `-shell-escape`. Without them (or without `node`), the document still compiles and magic-r prints a warning with the command it could not run.
 
 The package builds on [xlistings](https://github.com/EagleoutIce/xlistings) and is the R sibling of [magic-haskell](https://github.com/EagleoutIce/magic-haskell).

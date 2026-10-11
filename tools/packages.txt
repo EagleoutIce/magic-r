@@ -11,4 +11,5 @@ jsonlite lubridate magrittr modelr pillar purrr ragg readr readxl reprex rlang r
 tidyr xml2 tidyselect glue withr vctrs lifecycle scales
 # other popular packages
 fs here R6 patchwork data.table yaml httr2 curl writexl DBI RSQLite testthat devtools usethis roxygen2 knitr
-rmarkdown shiny Rcpp lme4 caret randomForest car zoo xts future furrr plotly igraph
+rmarkdown shiny Rcpp lme4 caret randomForest car zoo xts future furrr plotly igraph units
+janitor openxlsx sf emmeans gt

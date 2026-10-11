@@ -49,4 +49,5 @@ CODE: ## magic-r block 4
 CODE: x <- 1:10 %in% c(2, 0x1F, 1e-3) # a comment: "quoted" \ { } $ & ~ ^
 CODE: s <- 'it''s'; f <- \(a) a$b@c
 CODE: 
+CODE: ## magic-r indent 0,8,0
 ============================================================

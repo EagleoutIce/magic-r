@@ -676,8 +676,9 @@ test('a page that does not answer is kept, not dropped', async t => {
 test('call arrows: from a call to the name of the function it calls', () => {
 	const answer = structuredClone(flowAnswer);
 	answer.dataflow.graph.edgeInformation.find(([id]) => id === 8)[1].push([3, { types: 4 }]);
-	// a call that cannot go over the top runs along the lane right of the code (1000)
-	const call = '\\mrFlowCallArrow{5}{4}{1}{1}{1}{1}{0}{0}{1000/1/1/1/1/33}';
+	// a call that cannot go over the top runs along the lane left of the code, as no dataflow is there
+	// and that way is shorter
+	const call = '\\mrFlowCallArrow{5}{4}{1}{1}{1}{1}{0}{0}{0/1/1/1/1/33}';
 	assert.deepEqual(m.arrowTexts('5', answer, flowSource, [], false, ['4@f']), [call, '\\mrFlowArrowCriterion{5}{4}{1}{1}']);
 	// the name of the function: all of its calls
 	assert.deepEqual(m.arrowTexts('5', answer, flowSource, [], false, ['1@f']), [call, '\\mrFlowArrowCriterion{5}{1}{1}{1}']);
@@ -867,10 +868,19 @@ test('names that are no functions (data sets) are marked, so they are styled as 
 
 test('arrows into one name from one side do not cross below it', () => {
 	const lines = ['square <- 1', 'a_long_name_in_the_way <- 2', 'x <- square(3) + square(4)'];
-	// two calls from the right lane into square: the one entering further right runs closer to line 1
-	const calls = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6, call: true }, { lu: 3, cu: 17, nu: 6, ld: 1, cd: 1, nd: 6, call: true }], lines);
+	// two calls from the right lane into square (the dataflow takes the left one): the one entering
+	// further right runs closer to line 1
+	const flow = { lu: 3, cu: 1, nu: 1, ld: 1, cd: 1, nd: 1 };
+	const calls = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6, call: true }, { lu: 3, cu: 17, nu: 6, ld: 1, cd: 1, nd: 6, call: true }, flow], lines)
+		.filter(a => a.call);
+	assert.ok(calls.every(a => a.lane >= m.RIGHT));
 	const [right, left] = [...calls].sort((x, y) => y.ei - x.ei);
 	assert.ok(right.dt < left.dt);
+	// without dataflow at the left, the calls take the shorter way there
+	assert.ok(m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6, call: true }], lines).every(a => a.lane === 0));
+	// a call near the end of long lines takes the right lane
+	const far = ['xxxxxxxxxxxxxxxxxx f <- 1', 'xxxxxxxxxxxxxxxxxxxxxx', 'xxxxxxxxxxxxxxxxxxx f()'];
+	assert.ok(m.arrowTracks([{ lu: 3, cu: 21, nu: 1, ld: 1, cd: 20, nd: 1, call: true }], far).every(a => a.lane >= m.RIGHT));
 	// two from the left lane: the one entering further left runs closer
 	const data = m.arrowTracks([{ lu: 3, cu: 6, nu: 6, ld: 1, cd: 1, nd: 6 }, { lu: 3, cu: 17, nu: 6, ld: 1, cd: 1, nd: 6 }], lines);
 	const [l1, l2] = [...data].sort((x, y) => x.ei - y.ei);
@@ -923,4 +933,29 @@ test('the shell scripts write backslashes with printf, not echo (dash, sh on Ubu
 			assert.ok(!/\becho\b[^|;]*\\/.test(code), `${file}:${i + 1} gives echo a backslash: ${line.trim()}`);
 		});
 	}
+});
+
+test('the indentation of the lines of a block, which flowR does not get, is kept for the routes of arrows', () => {
+	const { blocks } = m.parseCode('## magic-r block 1\nf <- 1\nf\n## magic-r indent 0,20\n## magic-r block 2\nx\n');
+	assert.deepEqual(blocks.map(b => [b.lines, b.indent]), [[['f <- 1', 'f'], [0, 20]], [['x', ''], undefined]]);
+});
+
+test('a name defined by a call that returns a function, or by the name of one, is a function', () => {
+	// adder <- function(n) function(x) x; add1 <- adder(1); h <- adder; y <- 1
+	const v = (tag, l, c, e) => [tag, l, c, e];
+	const parts = { 0: v('vdef', 1, 1, 5), 9: v('fdef', 1, 22, 29), 11: v('fdef', 1, 10, 17), 17: v('fcall', 2, 9, 13),
+		13: v('vdef', 2, 1, 4), 20: v('use', 3, 6, 10), 19: v('vdef', 3, 1, 1), 30: v('vdef', 4, 1, 1), 31: v('value', 4, 6, 6) };
+	const unit = {
+		answer: {
+			dataflow: { graph: {
+				vertexInformation: Object.entries(parts).map(([id, [tag]]) => [Number(id), tag === 'fcall' ? { tag, name: 'adder' } : { tag }]),
+				edgeInformation: [[0, [[11, { types: 2 }]]], [17, [[0, { types: 1 }], [9, { types: 8 }]]], [13, [[17, { types: 2 }]]],
+					[20, [[0, { types: 1 }]]], [19, [[20, { types: 2 }]]], [30, [[31, { types: 2 }]]]]
+			} },
+			'location-map': { map: { ids: Object.fromEntries(Object.entries(parts).map(([id, [, l, c, e]]) => [id, [0, [l, c, l, e]]])) } }
+		},
+		at: l => ['1', l], source: l => ['adder <- function(n) function(x) x', 'add1 <- adder(1)', 'h <- adder', 'y <- 1'][l - 1]
+	};
+	const defs = m.flowFacts(unit).filter(f => f.startsWith('\\mrFlowDef'));
+	assert.deepEqual(defs.sort(), ['\\mrFlowDef{1@1@1}{fun}', '\\mrFlowDef{1@2@1}{fun}', '\\mrFlowDef{1@3@1}{fun}', '\\mrFlowDef{1@4@1}{var}']);
 });

@@ -415,6 +415,7 @@ export function libraryEntries(answer) {
 export const LABEL_MARK = /^## magic-r label (\S+)\s*$/;
 export const SCOPE_MARK = /^## magic-r scope (\S+)\s*$/;
 export const REQUEST_MARK = /^## magic-r request (\{.*\})\s*$/;
+export const INDENT_MARK = /^## magic-r indent ([\d,]+)\s*$/;
 
 /** the block a request names, by its label or id (the last one of that label), none for the document */
 export function blockOf(blocks, ref) {
@@ -433,6 +434,9 @@ export function parseCode(code) {
 			cur.label = label[1];
 		} else if(scope && cur) {
 			cur.scope = scope[1];
+		} else if(INDENT_MARK.test(line) && cur) {
+			// the indentation of each line, which flowR does not get
+			cur.indent = INDENT_MARK.exec(line)[1].split(',').map(Number);
 		} else if(req) {
 			try {
 				requests.push(JSON.parse(req[1]));
@@ -531,8 +535,21 @@ function graphOf(answer) {
 		return Array.isArray(l) ? l : undefined;
 	};
 	const out = id => edges.get(id) ?? [];
-	const kind = id => params.has(id) ? 'param'
-		: out(id).some(([t, types]) => types & EDGE.definedBy && vertices.get(t)?.tag === 'fdef') ? 'fun' : 'var';
+	// a definition of a function: by a function, a call that returns one ('add1 <- adder(1)'), or a
+	// name of one ('h <- adder')
+	const fun = (id, seen = new Set()) => {
+		const v = vertices.get(id);
+		if(!v || seen.has(id)) {
+			return false;
+		}
+		seen.add(id);
+		const to = bit => out(id).filter(([, types]) => types & bit).map(([t]) => t);
+		return v.tag === 'fdef'
+			|| v.tag === 'fcall' && to(EDGE.returns).some(t => fun(t, seen))
+			|| v.tag === 'use' && to(EDGE.reads).some(t => fun(t, seen))
+			|| v.tag === 'vdef' && to(EDGE.definedBy).some(t => fun(t, seen));
+	};
+	const kind = id => params.has(id) ? 'param' : fun(id) ? 'fun' : 'var';
 	// the name a vertex stands for in one line, and where it starts: '"w"' of assign("w", ...) is w, a
 	// backtick name has a column for each of its words, as magic-r sees them
 	const name = (id, source) => {
@@ -1758,7 +1775,7 @@ const REQUESTS = {
  * `route` 'auto' (the default) lets an arrow to a definition above run over the top where it can
  * (arrowTracks), 'side' keeps every arrow beside the code.
  */
-export function arrowTexts(block, answer, lines, criteria = [], all = false, calls = [], route = 'auto') {
+export function arrowTexts(block, answer, lines, criteria = [], all = false, calls = [], route = 'auto', indent = []) {
 	const g = graphOf(answer);
 	if(!g) {
 		return [];
@@ -1836,8 +1853,11 @@ export function arrowTexts(block, answer, lines, criteria = [], all = false, cal
 			}
 		}
 	}
-	const placed = all ? [...new Set(arrows.map(a => a.g))].flatMap(k => arrowTracks(arrows.filter(a => a.g === k), lines, route))
-		: arrowTracks(arrows, lines, route);
+	// the routes need the columns as they are shown, with the indentation of the lines
+	const ind = l => indent[l - 1] ?? 0, shown = lines.map((l, i) => ' '.repeat(ind(i + 1)) + l);
+	arrows.forEach(a => Object.assign(a, { cu: a.cu + ind(a.lu), cd: a.cd + ind(a.ld) }));
+	const placed = (all ? [...new Set(arrows.map(a => a.g))].flatMap(k => arrowTracks(arrows.filter(a => a.g === k), shown, route))
+		: arrowTracks(arrows, shown, route)).map(a => Object.assign(a, { cu: a.cu - ind(a.lu), cd: a.cd - ind(a.ld) }));
 	// the last argument: the lane, where the arrow ends and starts among those of its names, and the
 	// column of the lanes right of the code ('lane/i/n/i/n/column')
 	return [...placed.map(a => `\\mrFlow${a.call ? 'Call' : ''}Arrow{${block}}{${a.lu}}{${a.cu}}{${a.ld}}{${a.cd}}{${a.g}}{${a.ut}}{${a.dt}}{${a.lane}/${a.ei}/${a.en}/${a.si}/${a.sn}/${a.rc}}`), ...marks];
@@ -1866,7 +1886,10 @@ export function arrowTracks(arrows, lines = [], route = 'auto') {
 		return k;
 	};
 	const row = l => rows.get(l) ?? rows.set(l, []).get(l);
-	const span = a => a.lu === a.ld ? Math.abs(a.cu - a.cd) : a.cu + a.cd + 1000 * Math.abs(a.lu - a.ld);
+	// shorter first; of the same height, the arrows between the same lines one after another, so that
+	// their lanes are next to each other and no other lane runs between them
+	const span = a => a.lu === a.ld ? Math.abs(a.cu - a.cd)
+		: 1e9 * Math.abs(a.lu - a.ld) + 1e6 * Math.min(a.lu, a.ld) + a.cu + a.cd;
 	// the columns of the middle of a name: one, or the two around it for an even length
 	const middle = (c, n) => n % 2 ? [c + (n - 1) / 2] : [c + n / 2 - 1, c + n / 2];
 	const blank = (l, c) => !/\S/.test(lines[l - 1]?.[c - 1] ?? ' ');
@@ -1889,8 +1912,12 @@ export function arrowTracks(arrows, lines = [], route = 'auto') {
 		a.lane = lane;
 		ups.push(...cols.map(col => ({ col, key, lo: a.ld + 1, hi: a.lu - 1 })));
 	};
-	const right = [];
-	for(const a of [...arrows].sort((x, y) => span(x) - span(y))) {
+	const right = [], flow = [];
+	// the right lane starts after the longest line
+	const rc = Math.max(0, ...lines.map(l => l.trimEnd().length));
+	// the dataflow first, so that a call knows whether the left lane is free of it
+	const order = [...arrows].sort((x, y) => span(x) - span(y));
+	for(const a of [...order.filter(x => !x.call), ...order.filter(x => x.call)]) {
 		const fromUse = all(a.cu, a.nu ?? 1), intoDef = all(a.cd, a.nd ?? 1);
 		if(route === 'auto' && a.ld < a.lu && clear(a, fromUse, `u${a.lu}:${a.cu}`)) {
 			up(a, fromUse, `u${a.lu}:${a.cu}`, -2, a.ld);
@@ -1899,8 +1926,10 @@ export function arrowTracks(arrows, lines = [], route = 'auto') {
 		} else if(a.lu === a.ld) {
 			a.ut = a.dt = free(row(a.lu), Math.min(a.cu, a.cd), Math.max(a.cu, a.cd));
 			a.lane = 0;
-		} else if(a.call) {
-			// a call runs along a lane right of the code (lane RIGHT + k), apart from the dataflow at the left
+		} else if(a.call && (flow.some(f => f.lo <= Math.max(a.lu, a.ld) && Math.min(a.lu, a.ld) <= f.hi)
+			|| a.cu + a.cd > 2 * rc - (a.cu + (a.nu ?? 1) - 1) - (a.cd + (a.nd ?? 1) - 1))) {
+			// a call runs along a lane right of the code (lane RIGHT + k), apart from the dataflow at the
+			// left, unless no dataflow runs there along its lines and the way at the left is shorter
 			a.ut = free(row(a.lu), a.cu, Infinity);
 			a.dt = free(row(a.ld), a.cd, Infinity);
 			a.lane = RIGHT + free(right, Math.min(a.lu, a.ld), Math.max(a.lu, a.ld));
@@ -1908,6 +1937,9 @@ export function arrowTracks(arrows, lines = [], route = 'auto') {
 			a.ut = free(row(a.lu), 0, a.cu);
 			a.dt = free(row(a.ld), 0, a.cd);
 			a.lane = free(lanes, Math.min(a.lu, a.ld), Math.max(a.lu, a.ld));
+			if(!a.call) {
+				flow.push({ lo: Math.min(a.lu, a.ld), hi: Math.max(a.lu, a.ld) });
+			}
 		}
 	}
 	// arrows that share a name spread over it, in the order of where they come from or go to: the
@@ -1937,8 +1969,6 @@ export function arrowTracks(arrows, lines = [], route = 'auto') {
 	};
 	balance(a => `${a.ld}:${a.cd}`, 'dt', 'ei');
 	balance(a => `${a.lu}:${a.cu}`, 'ut', 'si');
-	// the right lane starts after the longest line
-	const rc = Math.max(0, ...lines.map(l => l.trimEnd().length));
 	arrows.forEach(a => a.rc = rc);
 	return arrows;
 }
@@ -2036,7 +2066,7 @@ export function requestTexts(repl, requests, blocks, dir, opts = {}) {
 		r = { ...r, criterion: crit(r.criterion), criteria: crit(r.criteria) };
 		const file = `r${todo.length}.R`;
 		fs.writeFileSync(path.join(dir, file), lines.join('\n') + '\n');
-		todo.push({ r, lines, shown, file });
+		todo.push({ r, lines, shown, file, indent: block?.indent });
 	}
 	// the requests of each flowR run together; one that flowR cannot answer must not take the others
 	// along: then each runs alone
@@ -2082,7 +2112,7 @@ const ANSWERS = {
 	dataflow:       ({ r, lines }, a) => [dataflowGraph(r.name, a, lines, graphOptions(r))],
 	'call-graph':   ({ r, lines }, a) => [callGraph(r.name, a, lines, graphOptions(r))],
 	'control-flow': ({ r, lines }, a) => [controlFlowGraph(r.name, a, lines, graphOptions(r))],
-	arrows:         ({ r, lines }, a) => arrowTexts(r.block, a, lines, r.criteria, r.all === true, r.calls ?? [], r.route === 'side' ? 'side' : 'auto'),
+	arrows:         ({ r, lines, indent }, a) => arrowTexts(r.block, a, lines, r.criteria, r.all === true, r.calls ?? [], r.route === 'side' ? 'side' : 'auto', indent),
 	lint:           ({ r, lines }, a) => lintTexts(r.block, a, lines),
 	slice:          ({ r, lines, shown }, a) => {
 		const kept = sliceLines(a);

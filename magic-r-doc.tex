@@ -639,8 +639,9 @@ count <- count + 1
 print(total)
 \end{mrdemo}
 
-The key \key[flowr]{mrcallsarrows}\TT{=\{criteria\}} draws the calls, along a lane right of the code where they
-cannot go over the top, apart from the dataflow at the left (the TikZ style \TT{mr call arrow} sets
+The key \key[flowr]{mrcallsarrows}\TT{=\{criteria\}} draws the calls. Where they
+cannot go over the top, they run along a lane right of the code, apart from the dataflow at the left,
+or left of the code where no dataflow runs along their lines and that way is shorter (the TikZ style \TT{mr call arrow} sets
 their look): from each
 call a criterion points at to the definition of the function it calls (also through another name,
 as \bmr{h <- f}). A criterion that points at the name of a function takes all of its calls, and
