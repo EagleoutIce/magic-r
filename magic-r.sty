@@ -120,6 +120,10 @@
 \def\mr@show#1#2#3{\ifx\relax#2\relax#3\else
   \ifmr@links\colorlet{mr@plain}{.}\mr@href{#2}{\mr@underline{\csname mr@style@#1\endcsname#3}}\else
   {\csname mr@style@#1\endcsname#3}\fi\fi}
+% as \mr@show, but without the underline: operators and keywords (option operators) link quietly
+\def\mr@quietshow#1#2#3{\ifx\relax#2\relax#3\else
+  \ifmr@links\colorlet{mr@plain}{.}\mr@href{#2}{\csname mr@style@#1\endcsname#3}\else
+  {\csname mr@style@#1\endcsname#3}\fi\fi}
 
 % \mrPackage[scheme]{package}{version}{entries} stores the entries of a
 % package; only the packages a document uses are read (\mr@load). An entry
@@ -243,7 +247,7 @@
 \def\mr@colpart{\ifx\mr@cur\@empty\else\eappto\mr@parts{\noexpand\mr@P{\mr@cur}}\appto\mr@shape{P}\def\mr@cur{}\fi}
 \def\mr@colsep{\ifx\mr@run\@empty\else\eappto\mr@parts{\noexpand\mr@S{\mr@run}}\appto\mr@shape{S}\def\mr@run{}\fi}
 \def\mr@ops#1{\ifmr@operators\ifcsname mr@nsop@#1\endcsname
-  \mr@show{op}{\mrDocsRManual/base/html/ns-dblcolon.html}{#1}\else{\mr@style@op#1}\fi\else{\mr@style@op#1}\fi}
+  \mr@quietshow{op}{\mrDocsRManual/base/html/ns-dblcolon.html}{#1}\else{\mr@style@op#1}\fi\else{\mr@style@op#1}\fi}
 \expandafter\let\csname mr@nsop@\detokenize{::}\endcsname\@empty
 \expandafter\let\csname mr@nsop@\detokenize{:::}\endcsname\@empty
 \edef\mr@two{\detokenize{::}}\edef\mr@three{\detokenize{:::}}
@@ -276,7 +280,7 @@
 \def\mr@ligature#1{\ifmr@ligatures\ifcsname mr@lig@#1\endcsname
      \mr@copyas{#1}{\csname mr@lig@#1\endcsname}\else\mr@opchars\fi\else\mr@opchars\fi}
 % an operator of R's syntax keeps its color, '%op%' is a function of a package
-\def\mr@opshow#1#2{\mr@show{plain}{#2}}
+\def\mr@opshow#1#2{\mr@quietshow{plain}{#2}}
 \edef\mr@percent{\expandafter\@gobble\string\%}
 \def\mr@maxlen{0}
 % #1 operator as typed ('\%in\%'): registered once, shortest first
@@ -373,7 +377,7 @@
 % with the option operators, keywords link to R's help and keep their style
 \def\mr@kwstyle{\lst@keywordstyle}
 \def\mr@kwlink#1{\expandafter\mr@resolve\expandafter{\mr@token}\expandafter\mr@kwshow\mr@found{#1}}
-\def\mr@kwshow#1#2{\mr@show{kw}{#2}}
+\def\mr@kwshow#1#2{\mr@quietshow{kw}{#2}}
 \def\mr@style@kw{\lst@keywordstyle}
 % the package of 'library(pkg)', unless the last run found 'character.only'
 \def\mr@libarg{\xdef\mr@libword{\the\mr@word}\xdef\mr@libdepth{\the\mr@depth}%

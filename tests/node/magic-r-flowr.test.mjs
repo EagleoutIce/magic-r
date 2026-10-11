@@ -756,6 +756,25 @@ test('a use links to what flowR defines it with, also under another name (assign
 		['\\mrFlowRef{5@4@7}{var}{5@2@10}']);
 });
 
+test('a replacement keeps the kind of the definition before (body(f) <- v), a call flowR resolves links', () => {
+	// f <- function(x) x; body(f) <- quote(1); f(); g(return(1)) with g <- function(a) a, as flowR 2.15.10
+	// answers: the call g reads no definition but calls its function
+	const source = ['f <- function(x) x', 'body(f) <- quote(1)', 'f()', 'g <- function(a) a', 'g(return(1))'];
+	const answer = {
+		dataflow: { graph: {
+			vertexInformation: [[1, { tag: 'vdef' }], [2, { tag: 'fdef' }], [3, { tag: 'vdef' }], [4, { tag: 'fcall', name: 'body<-' }],
+				[5, { tag: 'fcall', name: 'f' }], [6, { tag: 'vdef' }], [7, { tag: 'fdef' }], [8, { tag: 'fcall', name: 'g' }]],
+			edgeInformation: [[1, [[2, { types: 2 }]]], [3, [[4, { types: 3 }]]], [5, [[3, { types: 1 }]]],
+				[6, [[7, { types: 2 }]]], [8, [[7, { types: 4 }]]]]
+		} },
+		'location-map': { map: { ids: { 1: [0, [1, 1, 1, 1]], 2: [0, [1, 6, 1, 13]], 3: [0, [2, 6, 2, 6]], 4: [0, [2, 1, 2, 4]],
+			5: [0, [3, 1, 3, 1]], 6: [0, [4, 1, 4, 1]], 7: [0, [4, 6, 4, 13]], 8: [0, [5, 1, 5, 1]] } } }
+	};
+	const facts = m.flowFacts({ answer, at: l => ['5', l], source: l => source[l - 1] });
+	assert.ok(facts.includes('\\mrFlowDef{5@2@6}{fun}'));
+	assert.ok(facts.includes('\\mrFlowRef{5@5@1}{fun}{5@4@1}'));
+});
+
 test('the side files of older versions go, unless --no-cleanup', async t => {
 	// no network: the web backend fails, the document command still writes a status and cleans up
 	t.mock.method(globalThis, 'fetch', async() => {

@@ -515,6 +515,8 @@ export function detectWithFlowr(repl, blocks, dir) {
 
 const NAME = /^(?:[A-Za-z]|\.[A-Za-z._]?)[A-Za-z0-9._]*$/;
 const EDGE = { reads: 1, definedBy: 2, calls: 4, returns: 8, argument: 64 };
+/** a call of a replacement function, such as 'names<-' of names(x) <- v, but not an assignment */
+const isReplacement = v => v?.tag === 'fcall' && typeof v.name === 'string' && /^[^<].*<-$/.test(v.name) && v.name !== '<<-';
 /** the vertices and edges of a dataflow graph, with the location of each vertex */
 function graphOf(answer) {
 	const graph = answer?.dataflow?.graph, ids = answer?.['location-map']?.map?.ids ?? {};
@@ -566,6 +568,17 @@ export function flowFacts({ answer, at, source }) {
 	};
 	const name = id => g.name(id, source);
 	const before = (a, b) => a.line < b.line || a.line === b.line && a.col <= b.col;
+	// a replacement call ('body(f) <- v') redefines a name, which keeps the kind of its definition before
+	const strictlyBefore = (a, b) => a.line < b.line || a.line === b.line && a.col < b.col;
+	const kind = id => {
+		const k = g.kind(id), n = name(id);
+		if(k !== 'var' || !n || !g.out(id).some(([t, types]) => types & EDGE.definedBy && isReplacement(g.vertices.get(t)))) {
+			return k;
+		}
+		const prev = [...g.vertices].filter(([t, v]) => v.tag === 'vdef' && name(t)?.text === n.text && strictlyBefore(name(t), n))
+			.sort(([a], [b]) => before(name(a), name(b)) ? 1 : -1)[0];
+		return prev ? kind(prev[0]) : k;
+	};
 	const facts = new Map();
 	const set = (n, fact) => {
 		for(const c of n.cols ?? [n.col]) {
@@ -581,7 +594,7 @@ export function flowFacts({ answer, at, source }) {
 		}
 		if(v.tag === 'vdef') {
 			// the further words of a backtick name link to its first one
-			set(n, at => at === here ? `\\mrFlowDef{${at}}{${g.kind(id)}}` : `\\mrFlowRef{${at}}{${g.kind(id)}}{${here}}`);
+			set(n, at => at === here ? `\\mrFlowDef{${at}}{${kind(id)}}` : `\\mrFlowRef{${at}}{${kind(id)}}{${here}}`);
 		} else if(v.tag === 'use' || v.tag === 'fcall' && typeof v.name === 'string' && v.name === n.text) {
 			// the definition read last before the use, else the first one
 			const read = g.out(id).filter(([t, types]) => types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef')
@@ -595,10 +608,16 @@ export function flowFacts({ answer, at, source }) {
 			const listing = d => at(d.n.line)?.[0];
 			const pick = defs => defs.filter(d => before(d.n, n)).sort((a, b) => before(a.n, b.n) ? 1 : -1)[0]
 				?? defs.filter(d => listing(d) === at(n.line)?.[0])[0];
-			const def = pick(same) ?? (v.tag === 'use' ? pick(read) : undefined);
+			// a call flowR resolves to a function but reads no definition for ('g' of g(return(1))): the
+			// definitions of that function, of the same name
+			const called = v.tag === 'fcall' ? g.out(id).filter(([t, types]) => types & EDGE.calls && g.vertices.get(t)?.tag === 'fdef')
+				.flatMap(([f]) => [...g.vertices].filter(([t, w]) => w.tag === 'vdef'
+					&& g.out(t).some(([d, types]) => types & EDGE.definedBy && d === f)).map(([t]) => ({ t, n: name(t) })))
+				.filter(d => d.n && d.n.text === n.text && place(d.n.line, d.n.col)) : [];
+			const def = pick(same) ?? (v.tag === 'use' ? pick(read) : pick(called));
 			if(def) {
-				const kind = v.tag === 'fcall' ? 'fun' : g.kind(def.t);
-				set(n, at => `\\mrFlowRef{${at}}{${kind}}{${place(def.n.line, def.n.col)}}`);
+				const k = v.tag === 'fcall' ? 'fun' : kind(def.t);
+				set(n, at => `\\mrFlowRef{${at}}{${k}}{${place(def.n.line, def.n.col)}}`);
 			} else if(v.tag === 'use' && /^\s*=(?!=)/.test(source(n.line)?.slice(n.end) ?? '')) {
 				set(n, at => `\\mrFlowArg{${at}}`);
 			} else {
