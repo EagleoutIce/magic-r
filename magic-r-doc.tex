@@ -385,6 +385,8 @@ where \bmr{p} is a variable. By hand:
 \item The key \key{mrlibrary}\TT{=\{pkg,...\}} lets a listing run as if it started with
   \code|library(pkg)| for each package, without showing these calls. The packages are attached for this
   listing only, and the code of its playground link (\cref{sec:playground}) starts with the calls.
+\item The key \key{mrpackage} makes every name of inline code a package name, with the style and link
+  of a package, for names of packages in the text: \code|\bR[mrpackage]{dplyr}|.
 \item \cmd{mrLoadPackage}\TT{\{pkg,...\}} reads packages without attaching them, so that their
   names link if no attached package has them (unless \TT{strict}).
 \item \cmd{mrVersion}\TT{\{pkg\}} is the version of a package in the database:

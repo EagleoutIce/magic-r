@@ -366,6 +366,7 @@
   \xdef\mr@lastword{\the\mr@word}%
   \ifx\mr@rhs\@empty\else\ifx\mr@token\mr@kwfunction\mr@rhsdef{user}\else\mr@rhsdef{var}\fi\fi
   \ifx\mr@flowhit\relax\else\mr@flowhit\fi
+  \ifmr@forcepkg\let\mr@role\mr@role@pkg\let\lst@thestyle\mr@keyword\fi
   \ifx\lst@currstyle\mr@backtickcs\ifx\mr@flowhit\relax\let\mr@role\mr@role@plain\let\lst@thestyle\lst@currstyle\fi
     \global\mr@linestartfalse\gdef\mr@libstate{0}\fi
   \ifmr@operators\ifx\lst@thestyle\mr@kwstyle\ifcsname mr@K@\mr@token\endcsname\let\lst@thestyle\mr@kwlink\fi\fi\fi
@@ -703,6 +704,9 @@
 % the key mrlibrary={pkg,...}: the listing runs as if it started with library(pkg) for each, which it does
 % not show: its names link into these packages, and its playground code starts with these calls
 \lst@Key{mrlibrary}{}{\def\mr@libs{#1}}
+% the key mrpackage: every name is a package, for package names in the text ('\bR[mrpackage]{dplyr}')
+\newif\ifmr@forcepkg
+\lst@Key{mrpackage}{false}[t]{\lstKV@SetIf{#1}\ifmr@forcepkg}
 \lst@AddToHook{Init}{\ifmr@active\ifx\mr@libs\@empty\else
   \global\let\mr@libs@path\mr@path\expandafter\mrAttach\expandafter{\mr@libs}\fi\fi}
 \lst@AddToHook{DeInit}{\ifmr@active\ifx\mr@libs\@empty\else\global\let\mr@path\mr@libs@path\fi\fi}
