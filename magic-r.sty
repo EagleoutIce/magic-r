@@ -1609,6 +1609,14 @@
 \clist_new:N \l__mr_marks_clist
 \clist_new:N \l__mr_libs_clist
 \lst@Key { mrplayground } { } [ true ] { \tl_set:Nn \l__mr_play_tl {#1} }
+% the key mrprefix={code}: code the playground runs before the listing, which the listing does not show
+% (e.g. the definitions of an earlier listing), statements split at ';' into lines
+\str_new:N \l__mr_prefix_str
+\cs_generate_variant:Nn \str_replace_all:Nnn { Nee }
+\lst@Key { mrprefix } { } { \str_set:Nn \l__mr_prefix_str {#1} }
+% the key mrinclude={name,...}: the playground runs the code of these listings (key mrname) first
+\clist_new:N \l__mr_include_clist
+\lst@Key { mrinclude } { } { \clist_set:Nn \l__mr_include_clist {#1} }
 \lst@AddToHook { Init }
   {
     \legacy_if_gset_false:n { mr@play }
@@ -1620,11 +1628,16 @@
             \clist_set:Ne \l__mr_marks_clist { \l__mr_slice_tl , \l__mr_arrows_tl }
             \clist_set:Ne \l__mr_libs_clist { \mr@libs }
             \__mr_side_open:Nnn \g__mr_play_iow { play } { \c_true_bool }
+            % escaped for JSON
+            \str_replace_all:Nee \l__mr_prefix_str { \c_backslash_str } { \c_backslash_str \c_backslash_str }
+            \str_replace_all:Nee \l__mr_prefix_str { \tl_to_str:n { " } } { \c_backslash_str \tl_to_str:n { " } }
             \__mr_request:nnnn { playground } { pg- \int_use:N \mr@lstid } { \int_use:N \mr@lstid }
               {
                 , ~ "file":" \c_sys_jobname_str .mr-play.R", ~ "part":" \int_use:N \mr@lstid ",
                 ~ "marks": \__mr_json_list:N \l__mr_marks_clist
                 \clist_if_empty:NF \l__mr_libs_clist { , ~ "library": \__mr_json_list:N \l__mr_libs_clist }
+                \clist_if_empty:NF \l__mr_include_clist { , ~ "include": \__mr_json_list:N \l__mr_include_clist }
+                \str_if_empty:NF \l__mr_prefix_str { , ~ "prefix":" \l__mr_prefix_str " }
               }
           }
       }

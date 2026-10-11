@@ -763,6 +763,16 @@ for a listing. By default the button is a thin gray ring,
 The button sits \cmd[flowr]{mrPlayOffset} (\TT{.6em}) right of the text. A negative offset moves it
 into the text, e.g.\ \code|\renewcommand{\mrPlayOffset}{-3em}| left of the badge of \pkg{xlistings}.
 Redefining \cmd[flowr]{mrPlaceButton}\TT{\{button\}} puts it anywhere, and the link moves with it.
+The playground code can start with code the listing does not show, e.g.\ the definitions it uses from
+an earlier listing. The key \key[flowr]{mrinclude}\TT{=\{name,...\}} puts the code of the listings
+with these names (key \TT{mrname}) first, and \key[flowr]{mrprefix}\TT{=\{code\}} adds code after them,
+one line per statement at each \TT{;} outside strings and brackets (\code|\%| and \code|\#| for
+\TT{\%} and \TT{\#}). The marks move down with the code:
+\begin{latex}
+\begin{minted}[mrinclude=adder,mrprefix={add1 <- adder(1)}]{R}
+twice <- function(f, x) f(f(x))
+\end{minted}
+\end{latex}
 
 \subsection{Requesting flowR Queries}
 \backends{node,docker,r} \cmd[flowr]{mrFlowrQuery}\TT{[block=label,path=/json/pointer]\{name\}\{query\}} asks flowR

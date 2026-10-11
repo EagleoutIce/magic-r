@@ -959,3 +959,27 @@ test('a name defined by a call that returns a function, or by the name of one, i
 	const defs = m.flowFacts(unit).filter(f => f.startsWith('\\mrFlowDef'));
 	assert.deepEqual(defs.sort(), ['\\mrFlowDef{1@1@1}{fun}', '\\mrFlowDef{1@2@1}{fun}', '\\mrFlowDef{1@3@1}{fun}', '\\mrFlowDef{1@4@1}{var}']);
 });
+
+test('a playground link starts with the listings of mrinclude and the code of mrprefix', () => {
+	const code = extra => `## magic-r block 1\n## magic-r label adder\nadder <- function(n) function(x) x + n\n## magic-r request {"kind":"playground", "name":"pg-2", "block":"2", "marks":["1@y"]${extra}}\n## magic-r block 2\ny <- add1(2)`;
+	const decode = t => {
+		const m = /\\mrFlowrPlayground\{pg-2\}\{c=t([^&}]*)(?:&h=([^}]*))?\}/.exec(t);
+		return [Buffer.from(m[1], 'base64url').toString(), m[2]];
+	};
+	assert.deepEqual(decode(m.playgroundTexts(code(', "include":["adder"], "prefix":"add1 <- adder(1); z <- c(\\"a;b\\", 1)"'))[0]),
+		['adder <- function(n) function(x) x + n\nadd1 <- adder(1)\nz <- c("a;b", 1)\ny <- add1(2)', '4@y']);
+	assert.deepEqual(m.prefixLines('f <- function(x) { a; b }; x \\% 2'), ['f <- function(x) { a; b }', 'x % 2']);
+});
+
+test('mrinclude skips unknown names and the empty lines at the end of a listing, after the packages of mrlibrary', () => {
+	const code = `## magic-r block 1\n## magic-r label a\nx <- 1\n\n\n## magic-r request {"kind":"playground", "name":"pg-2", "block":"2", "marks":["1@y"], "library":["dplyr"], "include":["nope","a"]}\n## magic-r block 2\ny <- x`;
+	const m2 = /\\mrFlowrPlayground\{pg-2\}\{c=t([^&}]*)&h=([^}]*)\}/.exec(m.playgroundTexts(code)[0]);
+	assert.deepEqual([Buffer.from(m2[1], 'base64url').toString(), m2[2]], ['library(dplyr)\nx <- 1\ny <- x', '3@y']);
+});
+
+test('mrprefix splits only at top-level semicolons and unescapes TeX specials', () => {
+	assert.deepEqual(m.prefixLines(''), []);
+	assert.deepEqual(m.prefixLines(undefined), []);
+	assert.deepEqual(m.prefixLines("a <- 'x;y'; b <- `c;d`;; f(1;2)"), ["a <- 'x;y'", 'b <- `c;d`', 'f(1;2)']);
+	assert.deepEqual(m.prefixLines('s <- "a\\";b"; \\#x'), ['s <- "a\\";b"', '#x']);
+});

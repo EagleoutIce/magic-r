@@ -1733,6 +1733,38 @@ export function sessionTexts(repl, requests, dir) {
 	return out;
 }
 
+/** the lines of the code of the key mrprefix: its statements, split at each ';' outside strings and brackets */
+export function prefixLines(prefix) {
+	const text = String(prefix ?? '').replace(/\\([%#&_$])/g, '$1');
+	const out = [];
+	let cur = '', depth = 0, quote = null;
+	for(let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if(quote) {
+			cur += ch;
+			if(ch === '\\' && i + 1 < text.length) {
+				cur += text[++i];
+			} else if(ch === quote) {
+				quote = null;
+			}
+		} else if(ch === ';' && depth === 0) {
+			out.push(cur);
+			cur = '';
+		} else {
+			if(ch === '"' || ch === "'" || ch === '`') {
+				quote = ch;
+			} else if('([{'.includes(ch)) {
+				depth++;
+			} else if(')]}'.includes(ch)) {
+				depth = Math.max(0, depth - 1);
+			}
+			cur += ch;
+		}
+	}
+	out.push(cur);
+	return out.map(l => l.trim()).filter(l => l !== '');
+}
+
 /** the links of the listings that ask for one (no flowR needed): \mrFlowrPlayground{name}{hash} */
 export function playgroundTexts(code) {
 	const { blocks, requests } = parseCode(code);
@@ -1747,8 +1779,20 @@ export function playgroundTexts(code) {
 		// the packages the listing attaches without showing it (key mrlibrary) come first, the marks move down
 		const libs = [].concat(r.library ?? []).map(String).filter(p => /^[A-Za-z][A-Za-z0-9.]*$/.test(p))
 			.filter(p => !lines.some(l => new RegExp(`\\b(library|require)\\(\\s*["']?${p.replace(/\./g, '\\.')}["']?\\s*[,)]`).test(l)));
-		const shifted = marks.map(c => c.replace(/^\d+/, n => String(Number(n) + libs.length)));
-		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...libs.map(p => `library(${p})`), ...lines], shifted)}}`];
+		// then the code of the listings the key mrinclude names, then the code of the key mrprefix,
+		// neither of which the listing shows
+		const included = [].concat(r.include ?? []).map(String).flatMap(n => {
+			const inc = blockOf(blocks, n);
+			const ls = inc ? [...sideLines({ file: r.file, part: inc.id }) ?? inc.lines] : [];
+			// without the empty lines at its end
+			while(ls.length > 0 && ls.at(-1).trim() === '') {
+				ls.pop();
+			}
+			return ls;
+		});
+		const pre = [...libs.map(p => `library(${p})`), ...included, ...prefixLines(r.prefix)];
+		const shifted = marks.map(c => c.replace(/^\d+/, n => String(Number(n) + pre.length)));
+		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...pre, ...lines], shifted)}}`];
 	});
 }
 
