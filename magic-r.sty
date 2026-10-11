@@ -1883,6 +1883,19 @@
 \def\mr@aband#1#2#3{\fill[\mr@acolorof{#2}!#3,blend mode=multiply,rounded corners=1pt](#1.south west)rectangle(#1.north east);}
 % a listing with arrows stays on one page: no line lets a page break follow it
 \lst@AddToHook{EveryPar}{\ifmr@active\ifcsname mr@arrows@\the\mr@lstid\endcsname\vadjust{\nobreak}\fi\fi}
+% a listing breaks across pages or columns only with at least \mrKeepLines lines on each side (the number
+% of lines of a listing is from the last run), so no line of it stands alone
+\def\mrKeepLines{2}
+\def\mr@lstlines#1#2{\csgdef{mr@lines@#1}{#2}}
+\lst@AddToHook{EveryPar}{\ifmr@active
+  \ifnum\numexpr\mr@line+1<\mrKeepLines\relax\vadjust{\nobreak}\else
+  \ifcsname mr@lines@\the\mr@lstid\endcsname
+    \ifnum\numexpr\mr@line+1>\numexpr\csname mr@lines@\the\mr@lstid\endcsname-\mrKeepLines\relax\relax
+      \vadjust{\nobreak}\fi\fi\fi\fi}
+% the lines a listing shows (not the empty ones at its end, which listings drops)
+\lst@AddToHook{Init}{\global\let\mr@shown\z@}
+\lst@AddToHook{EveryPar}{\xdef\mr@shown{\the\numexpr\mr@line+1}}
+\lst@AddToHook{DeInit}{\ifmr@active\ifnum\mr@shown>\z@\mr@write{\string\mr@lstlines{\the\mr@lstid}{\mr@shown}}\fi\fi}
 % where the code of the first line starts: the lane of the arrows is left of it
 \lst@AddToHook{EveryPar}{\ifmr@active\ifnum\mr@line=\z@\ifcsname mr@arrows@\the\mr@lstid\endcsname\ifdefined\tikz
   \tikz[remember picture,overlay]\coordinate(mr-a-\the\mr@lstid-o);\mr@apredefine\fi\fi\fi\fi}
@@ -1945,7 +1958,7 @@
 \def\mr@defocc#1{\mr@write{\string\mr@occ{\the\mr@lstid}{#1}}}
 \AtBeginDocument{\if@filesw\immediate\write\@auxout{\string\providecommand\string\mr@occ[2]{}%
   \string\providecommand\string\mr@ssav[2]{}\string\providecommand\string\mr@lstlabel[3]{}%
-  \string\providecommand\string\mr@ixof[3]{}}\fi}
+  \string\providecommand\string\mr@ixof[3]{}\string\providecommand\string\mr@lstlines[2]{}}\fi}
 \def\mr@lstlabel#1#2#3{\csgdef{mr@lbl@#1}{{#2}{#3}}}
 % from the aux file: the name at place #1 (a target) is #3, with the index #2 its listing shows
 \def\mr@ixof#1#2#3{\csgdef{mr@ixof@#1}{{#2}{#3}}}
