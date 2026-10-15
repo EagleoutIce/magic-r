@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # the version of flowR the shipped database was generated with
-  FLOWR_VERSION: 2.15.10
+  # the version of flowR the tests and the manual run with (the shipped database names its own in its first line)
+  FLOWR_VERSION: 2.16.1
   # the oldest xlistings magic-r supports (\mr@xlistings@min in magic-r.sty, v1.0.0 of 2026/08/17)
   XLISTINGS_MIN: e45cc1091f795934671d8ead041e9c4da63baf6d
 

@@ -439,6 +439,8 @@
 \def\mr@flowblock#1{\csgdef{mr@flow@#1}{}}
 \newcommand*\mrFlowDef[2]{\csgdef{mr@fl@#1}{\mr@fl{#2}{#1}\let\mr@flowlink\mr@flowplace}}
 \newcommand*\mrFlowRef[3]{\csgdef{mr@fl@#1}{\mr@fl{#2}{#3}\let\mr@flowlink\mr@flowref}}
+% a name defined in a file of mrsource: styled by its kind, no link (the document does not show it)
+\newcommand*\mrFlowFile[2]{\csgdef{mr@fl@#1}{\mr@fl{#2}{}\let\mr@flowlink\mr@flowshow}}
 \newcommand*\mrFlowExt[1]{\csgdef{mr@fl@#1}{\ifx\mr@role\mr@role@pkg\else\let\mr@role\mr@role@ext\fi}}
 \newcommand*\mrFlowArg[1]{\csgdef{mr@fl@#1}{\let\mr@role\mr@role@plain}}
 \newcommand*\mrFlowLine[2]{\csgdef{mr@fline@#1}{#2}}
@@ -452,6 +454,7 @@
   \ifcsname mr@placed@\the\mr@lstid @\mr@token\endcsname\else\csgdef{mr@placed@\the\mr@lstid @\mr@token}{}%
   \ifdefined\hypertarget\mr@target{mr.\the\mr@lstid.\mr@token}\fi\fi}
 \def\mr@flowplace#1{\mr@flowanchor{\colorlet{mr@plain}{.}\mr@flowstyle#1}}
+\def\mr@flowshow#1{{\colorlet{mr@plain}{.}\mr@flowstyle#1}}
 \def\mr@flowref#1{\mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.f.\mr@flowtarget}{\mr@underline{\mr@flowstyle#1}}}%
   {{\mr@flowstyle#1}}}
 % the name of 'assign("name", ...)', within the string
@@ -462,8 +465,10 @@
       \ifx\mr@role\mr@role@flow\let\lst@thestyle\mr@strflow\else\let\lst@thestyle\mr@strstyle\fi\fi
   \else\mr@stringword@\fi}
 \def\mr@strflow#1{\ifx\mr@flowlink\mr@flowplace\mr@flowanchor\mr@strstyle{#1}\else
+  \ifx\mr@flowlink\mr@flowshow\mr@strstyle{#1}\else\mr@strflowref{#1}\fi\fi}
+\def\mr@strflowref#1{%
   \mr@iflocal{\colorlet{mr@plain}{.}\hyperlink{mr.f.\mr@flowtarget}{\mr@underline{\mr@strstyle{#1}}}}%
-  {\mr@strstyle{#1}}\fi}
+  {\mr@strstyle{#1}}}
 \def\mr@stringword@{\ifnum\mr@asgstate=2 \gdef\mr@asgstate{0}\mr@tokenname\let\mr@role\@empty
   \mr@localdef{var}\ifmr@defhere\let\mr@strstyle\lst@thestyle\let\lst@thestyle\mr@strdef\fi\fi
   \ifnum\mr@asgstate=4 \gdef\mr@asgstate{0}\mr@tokenname
@@ -1105,6 +1110,10 @@
                   { \tl_if_empty:NF \g__mr_scope_tl
                       { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~scope~ \tl_to_str:N \g__mr_scope_tl } } }
                   { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~scope~ \tl_to_str:N \l__mr_scope_tl } }
+                % flowR looks for reads, writes, ... only in listings that mark them
+                \legacy_if:nT { mr@dependencies }
+                  { \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~dependencies } }
+                \__mr_write_sources:
               }
             \tl_gput_right:Ne \g__mr_indents_tl
               { , \tl_if_empty:NTF \g__mr_line_tl { 0 } { \int_use:N \g__mr_indent_int } }
@@ -1117,6 +1126,28 @@
     \tl_gclear:N \g__mr_line_tl
   }
 \lst@AddToHook { EOL } { \__mr_write_line: }
+% the key mrsource={file,...}: the listing runs as if it sourced these R files first, unshown (their
+% names are styled, not linked; files of their own in the playground). TeX copies them into the code
+% for flowR, so a change of a file runs flowR again
+\clist_new:N \l__mr_source_clist
+\lst@Key { mrsource } { } { \clist_set:Nn \l__mr_source_clist {#1} }
+\ior_new:N \g__mr_source_ior
+\msg_new:nnn { magic-r } { source } { The~file~'#1'~of~the~key~mrsource~is~not~there. }
+\cs_new_protected:Npn \__mr_write_sources:
+  {
+    \clist_map_inline:Nn \l__mr_source_clist
+      {
+        \file_if_exist:nTF {##1}
+          {
+            \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~source~ \tl_to_str:n {##1} }
+            \ior_open:Nn \g__mr_source_ior {##1}
+            \ior_str_map_inline:Nn \g__mr_source_ior { \iow_now:Nn \g__mr_code_iow {####1} }
+            \ior_close:N \g__mr_source_ior
+            \iow_now:Ne \g__mr_code_iow { \c_hash_str \c_hash_str \c_space_tl magic-r~source-end }
+          }
+          { \msg_warning:nnn { magic-r } { source } {##1} }
+      }
+  }
 % flowR gets the lines without their indentation: their indentation follows the block, for the
 % routes of arrows ('## magic-r indent 0,2,2'), if a line has one
 \tl_new:N \g__mr_indents_tl
@@ -1692,8 +1723,10 @@
 % the colors of the kinds of lines; a kind without one is not marked ('output')
 \definecolor{mrread}{HTML}{1E66F5}\definecolor{mrwrite}{HTML}{DF8E1D}
 \definecolor{mrsource}{HTML}{40A02B}\definecolor{mrvisualize}{HTML}{8839EF}
+\definecolor{mrstatistics}{HTML}{179299}
 \def\mr@dep@read{mrread}\def\mr@dep@write{mrwrite}\def\mr@dep@source{mrsource}
 \def\mr@dep@visualize{mrvisualize}\def\mr@dep@test{mrsource}\def\mr@dep@remote{mrread}
+\def\mr@dep@statistics{mrstatistics}
 \def\mr@style@dim{\color{lightgray}}
 % a dimmed line has no colored numbers: \mr@numbers restores those of the listing at a line start
 \lst@AddToHook{Init}{\let\mr@dgt\xlst@dgt\let\mr@pfx\xlst@pfx}

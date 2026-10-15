@@ -129,13 +129,25 @@ test('each scope is analyzed as a program of its own', async() => {
 	assert.match(out, /\\mrFlowBlocks\{1,3,2\}/);
 });
 
+/** what a link into the playground carries: its code, its other files, and its marks */
+function playground(text) {
+	const hash = /\\mrFlowrPlayground\{[^}]*\}\{([^}]*)\}/.exec(text)[1];
+	const fields = Object.fromEntries(hash.split('&').map(f => [f.slice(0, f.indexOf('=')), f.slice(f.indexOf('=') + 1)]));
+	const unpack = f => f === undefined ? undefined : (assert.equal(f[0], 't'), Buffer.from(f.slice(1), 'base64url').toString());
+	const files = unpack(fields.o);
+	return { code: unpack(fields.c), files: files && JSON.parse(files), marks: fields.h && decodeURIComponent(fields.h), ...fields.p ? { at: fields.p } : {} };
+}
+
 test('a playground link starts with the packages of mrlibrary', () => {
 	const code = (lib, body) => `## magic-r request {"kind":"playground", "name":"pg-1", "block":"1", "marks":["2@x"], "library":${lib}}\n## magic-r block 1\n${body}`;
 	const decode = t => {
-		const m = /\\mrFlowrPlayground\{pg-1\}\{c=t([^&}]*)(?:&h=([^}]*))?\}/.exec(t);
+		const m = /\\mrFlowrPlayground\{pg-1\}\{c=t([^&}]*)(?:&h=([^&}]*))?(?:&p=[^}]*)?\}/.exec(t);
 		return [Buffer.from(m[1], 'base64url').toString(), m[2]];
 	};
 	assert.deepEqual(decode(m.playgroundTexts(code('["dplyr"]', 'y <- 1\nx <- y'))[0]), ['library(dplyr)\ny <- 1\nx <- y', '3@x']);
+	// the cursor is on the first criterion, moved down with it, so the page opens on its slice
+	assert.match(m.playgroundTexts(code('["dplyr"]', 'y <- 1\nx <- y'))[0], /&p=3:1\}$/);
+	assert.match(m.playgroundTexts(code('["dplyr"]', 'y <- 1\nz <- 2; x <- y'))[0], /&p=3:9\}$/);
 	assert.deepEqual(decode(m.playgroundTexts(code('["dplyr"]', 'library(dplyr)\nx <- 1'))[0])[0], 'library(dplyr)\nx <- 1');
 	assert.deepEqual(decode(m.playgroundTexts(code('[]', 'y <- 1\nx <- y'))[0]), ['y <- 1\nx <- y', '2@x']);
 });
@@ -178,7 +190,7 @@ test('the answers of flowR', () => {
 
 test('a document: packages, loads, and operators', async() => {
 	const out = await document('## magic-r block 2\nx <- 1\nlibrary(dplyr)\n## magic-r block 5\nrequire(magrittr)\nnothing::f\n');
-	assert.match(out, /^% magic-r: the packages of the document, found by node flowR 2\.15\.10\n\\mrFlowrStatus\{ok\}\{node flowR 2\.15\.10\}\n/);
+	assert.match(out, /^% magic-r: the packages of the document, found by node flowR 2\.16\.1\n\\mrFlowrStatus\{ok\}\{node flowR 2\.16\.1\}\n/);
 	assert.match(out, /\\mrPackage\[cran\]\{dplyr\}\{1\.2\.1\}\{%\n/);
 	assert.match(out, /\\T\{reexports\}\{\\%>\\%,\}%/);
 	assert.match(out, /\\mrPackage\[cran\]\{magrittr\}\{2\.0\.5\}/);
@@ -201,8 +213,25 @@ test('a block that does not parse is skipped, the others count', async() => {
 	assert.match(out, /\\mrLoad\{3\}\{1\}\{magrittr\}/);
 });
 
+test('flowR\'s errors in an answer are told as such', () => {
+	assert.equal(m.answerError({ dataflow: { graph: {} }, 'location-map': {} }), undefined);
+	assert.equal(m.answerError(null), undefined);
+	assert.equal(m.answerError({ 'static-slice': { results: {}, error: 'the slicing criteria \'9@zz\' match no element of the program' } }),
+		'static-slice: the slicing criteria \'9@zz\' match no element of the program');
+	assert.match(m.answerError({ dataflow: { error: 'At least one request must be set to run the analysis pipeline\n Report a Bug: https://x' } }),
+		/^dataflow: flowR found no R code in the file it was given/);
+	// in a batch of slices, the error belongs to the slices without a result
+	const b = { slices: 2, queries: [{ type: 'static-slice', criteria: ['2@y'] }, { type: 'static-slice', criteria: ['9@zz'] }] };
+	const a = { 'static-slice': { results: { '2@y': { slice: { result: [1] } } }, error: 'the slicing criteria \'9@zz\' match no element of the program' } };
+	assert.equal(m.answerError(m.memberAnswer(b, { slice: 0 }, a)), undefined);
+	assert.deepEqual(m.memberAnswer(b, { slice: 0 }, a)['static-slice'].results, { '2@y': { slice: { result: [1] } } });
+	// the slice without a result runs alone, where flowR tells its own error
+	assert.equal(m.memberAnswer(b, { slice: 1 }, a), undefined);
+});
+
 test('failures become a status, never a missing file', async() => {
-	for(const [mode, why] of [['crash', /0 of 1 answers from flowR: TypeError: boom/], ['notflowr', /node: not flowR/], ['old', /no library entries/]]) {
+	for(const [mode, why] of [['crash', /no answers from flowR: TypeError: boom/], ['notflowr', /node: not flowR/], ['old', /answered none of the analyses/],
+		['nofile', /node: dependencies: flowR found no R code in the file it was given \(the file is missing/]]) {
 		const out = await withEnv({ FAKE_MODE: mode }, () => document('## magic-r block 1\nlibrary(dplyr)\n'));
 		assert.match(out, /^\\mrFlowrStatus\{failed\}\{/, mode);
 		assert.match(out, why, mode);
@@ -215,7 +244,7 @@ test('failures become a status, never a missing file', async() => {
 test('packages are cached per flowR and package version', async() => {
 	const cache = tmp();
 	const first = await document('library(dplyr)\n', { noCache: false, cache });
-	const file = path.join(cache, 'flowr-2.15.10-f4', 'dplyr@1.2.1.cfg');
+	const file = path.join(cache, 'flowr-2.16.1-f4', 'dplyr@1.2.1.cfg');
 	assert.ok(fs.existsSync(file));
 	fs.writeFileSync(file, '\\mrPackage{dplyr}{1.2.1}{\\N{cached,}}\n');
 	const second = await document('library(dplyr)\n', { noCache: false, cache });
@@ -252,7 +281,7 @@ test('backends: an explicit one, and auto without anything', () => {
 	const auto = withEnv({ PATH: '', MAGIC_R_FLOWR: '' }, () => m.backends({}));
 	assert.deepEqual(auto.map(b => b.name), ['web']);
 	const docker = new m.Repl('docker', dir => ['docker', 'run', dir], { mount: '/work' });
-	assert.equal(docker.query([{ type: 'x' }], '/tmp/a', 'doc.R'), ':query* [{"type":"x"}] file:///work/doc.R');
+	assert.equal(docker.query([{ type: 'x' }], '/tmp/a', 'doc.R'), ':query* "[{\\"type\\":\\"x\\"}]" file:///work/doc.R');
 	assert.deepEqual(docker.prefix('/tmp/a'), ['docker', 'run', '/tmp/a']);
 });
 
@@ -368,6 +397,16 @@ test('graphs are laid out in layers, requests answer', () => {
 	const placed = m.layout(nodes, [{ from: 'b', to: 'a' }, { from: 'c', to: 'b' }, { from: 'a', to: 'c' }]);
 	assert.equal(new Set(placed.map(n => n.y)).size, 3); // the cycle is broken, a chain remains
 	assert.ok(placed.every(n => Number.isFinite(n.x)));
+	// a deep graph whose long edges put thousands of points into each layer (the dataflow graph of a
+	// long script): in about linear time, and the nodes of a layer do not overlap
+	const deep = Array.from({ length: 1200 }, (_, i) => ({ id: `n${i}`, label: [`name${i}`], pos: i }));
+	const reads = deep.flatMap((n, i) => i < 8 ? [] : [{ from: n.id, to: `n${i - 8}` }, { from: n.id, to: `n${i % 8}` }]);
+	const start = Date.now();
+	const laid = m.layout(deep, reads);
+	assert.ok(Date.now() - start < 20000, `took ${Date.now() - start} ms`);
+	for(const row of Map.groupBy(laid, n => n.y).values()) {
+		row.sort((p, q) => p.x - q.x).forEach((n, i) => i && assert.ok(n.x - row[i - 1].x >= (n.w + row[i - 1].w) / 2 - 0.02, `${row[i - 1].id} and ${n.id} overlap`));
+	}
 	const graph = m.dataflowGraph('g', flowAnswer, flowSource);
 	assert.match(graph, /^\\mrFlowrGraph\{g\}\{\\mrGraphNode\[[\d.]+\]\{v0\}/);
 	assert.match(graph, /\\mrGraphPath\{reads\}\{\(mr-v2\.north\) -- \(mr-v1\.south\)\}/);
@@ -377,12 +416,12 @@ test('graphs are laid out in layers, requests answer', () => {
 	assert.equal(m.pointer({ a: [1, 2] }, '/a'), '1, 2');
 	assert.equal(m.pointer({ a: 1 }, '/b'), '??');
 	const dir = tmp();
-	const repl = { query: (q, d, f) => JSON.stringify(q) + f, exec: cmds => cmds.map(c => c.includes('static-slice') ? { 'static-slice': { results: {} } } : flowAnswer) };
+	const repl = { file: (d, f) => f, query: (q, d, f) => JSON.stringify(q) + f, exec: cmds => cmds.map(c => c.includes('static-slice') ? { ...flowAnswer, 'static-slice': { results: { '4:3': {} } } } : flowAnswer) };
 	const blocks = [{ id: '1', label: 'demo', lines: flowSource }];
 	assert.deepEqual(m.requestTexts(repl, [
 		{ kind: 'slice', name: 's', block: 'demo', criterion: '4@p' }, { kind: 'query', name: 'q', query: [{ type: 'x' }], path: '/dependencies/read/0/value' },
 		{ kind: 'slice', name: 'bad name' }, { kind: 'slice', name: 'missing', block: 'nowhere' }
-	], blocks, dir), ['\\mrFlowrSlice{s}{}', '\\mrFlowrResult{q}{x.csv}']);
+	], blocks, dir), ['\\mrFlowrRequestsFailed{slice s: its criteria match nothing}', '\\mrFlowrResult{q}{x.csv}']);
 });
 
 test('versions of flowR can be required', async() => {
@@ -392,7 +431,7 @@ test('versions of flowR can be required', async() => {
 	assert.ok(m.satisfies('2.15.10', '<3'));
 	assert.ok(!m.satisfies(undefined, '>=1'));
 	assert.throws(() => m.satisfies('1', 'newest'), /cannot read/);
-	assert.match(await document('library(dplyr)\n', { requireVersion: '>=3' }), /failed\}\{node: flowR 2\.15\.10 does not satisfy >=3/);
+	assert.match(await document('library(dplyr)\n', { requireVersion: '>=3' }), /failed\}\{node: flowR 2\.16\.1 does not satisfy >=3/);
 	assert.match(await document('library(dplyr)\n', { requireVersion: '>=2.15' }), /\\mrFlowrStatus\{ok\}/);
 });
 
@@ -577,7 +616,7 @@ test('links into flowR\'s playground carry the code, marks, and a cursor', () =>
 	assert.match(hash, /^[A-Za-z0-9\-._~!$'()*,;:@/?=&%]+$/);
 	const code = ['## magic-r block 3', ...lines,
 		'## magic-r request {"kind":"playground","name":"pg-3","block":"3","marks":["2@[2]count", "$7"]}'].join('\n');
-	assert.deepEqual(m.playgroundTexts(code), [`\\mrFlowrPlayground{pg-3}{${m.playgroundHash(lines, ['2:10'])}}`]);
+	assert.deepEqual(m.playgroundTexts(code), [`\\mrFlowrPlayground{pg-3}{${m.playgroundHash(lines, ['2:10'], '2:10')}}`]);
 	assert.deepEqual(m.playgroundTexts(code.replace('"block":"3"', '"block":"9"')), []);
 });
 
@@ -960,21 +999,18 @@ test('a name defined by a call that returns a function, or by the name of one, i
 	assert.deepEqual(defs.sort(), ['\\mrFlowDef{1@1@1}{fun}', '\\mrFlowDef{1@2@1}{fun}', '\\mrFlowDef{1@3@1}{fun}', '\\mrFlowDef{1@4@1}{var}']);
 });
 
-test('a playground link starts with the listings of mrinclude and the code of mrprefix', () => {
+test('a playground link has the listings of mrinclude as files of their own, the code of mrprefix first', () => {
 	const code = extra => `## magic-r block 1\n## magic-r label adder\nadder <- function(n) function(x) x + n\n## magic-r request {"kind":"playground", "name":"pg-2", "block":"2", "marks":["1@y"]${extra}}\n## magic-r block 2\ny <- add1(2)`;
-	const decode = t => {
-		const m = /\\mrFlowrPlayground\{pg-2\}\{c=t([^&}]*)(?:&h=([^}]*))?\}/.exec(t);
-		return [Buffer.from(m[1], 'base64url').toString(), m[2]];
-	};
-	assert.deepEqual(decode(m.playgroundTexts(code(', "include":["adder"], "prefix":"add1 <- adder(1); z <- c(\\"a;b\\", 1)"'))[0]),
-		['adder <- function(n) function(x) x + n\nadd1 <- adder(1)\nz <- c("a;b", 1)\ny <- add1(2)', '4@y']);
+	assert.deepEqual(playground(m.playgroundTexts(code(', "include":["adder"], "prefix":"add1 <- adder(1); z <- c(\\"a;b\\", 1)"'))[0]), {
+		code: 'add1 <- adder(1)\nz <- c("a;b", 1)\ny <- add1(2)', files: [['adder.R', 'adder <- function(n) function(x) x + n']], marks: '3@y', at: '3:1' });
+	// without any, the link has no other files
+	assert.deepEqual(playground(m.playgroundTexts(code(''))[0]), { code: 'y <- add1(2)', files: undefined, marks: '1@y', at: '1:1' });
 	assert.deepEqual(m.prefixLines('f <- function(x) { a; b }; x \\% 2'), ['f <- function(x) { a; b }', 'x % 2']);
 });
 
 test('mrinclude skips unknown names and the empty lines at the end of a listing, after the packages of mrlibrary', () => {
 	const code = `## magic-r block 1\n## magic-r label a\nx <- 1\n\n\n## magic-r request {"kind":"playground", "name":"pg-2", "block":"2", "marks":["1@y"], "library":["dplyr"], "include":["nope","a"]}\n## magic-r block 2\ny <- x`;
-	const m2 = /\\mrFlowrPlayground\{pg-2\}\{c=t([^&}]*)&h=([^}]*)\}/.exec(m.playgroundTexts(code)[0]);
-	assert.deepEqual([Buffer.from(m2[1], 'base64url').toString(), m2[2]], ['library(dplyr)\nx <- 1\ny <- x', '3@y']);
+	assert.deepEqual(playground(m.playgroundTexts(code)[0]), { code: 'library(dplyr)\ny <- x', files: [['a.R', 'x <- 1']], marks: '2@y', at: '2:1' });
 });
 
 test('mrprefix splits only at top-level semicolons and unescapes TeX specials', () => {
@@ -982,4 +1018,291 @@ test('mrprefix splits only at top-level semicolons and unescapes TeX specials', 
 	assert.deepEqual(m.prefixLines(undefined), []);
 	assert.deepEqual(m.prefixLines("a <- 'x;y'; b <- `c;d`;; f(1;2)"), ["a <- 'x;y'", 'b <- `c;d`', 'f(1;2)']);
 	assert.deepEqual(m.prefixLines('s <- "a\\";b"; \\#x'), ['s <- "a\\";b"', '#x']);
+});
+
+test('flowR answers only what the document needs: the other kinds of dependencies only for listings that mark lines', async() => {
+	const repl = { version: () => '2.15.10' };
+	assert.deepEqual(m.analysis(repl, [{ id: '1' }])[0], { type: 'dependencies', enabledCategories: ['library'] });
+	assert.deepEqual(m.analysis(repl, [{ id: '1' }, { id: '2', dependencies: true }])[0], { type: 'dependencies' });
+	// flowR before 2.4.8 knows no categories, nor does a backend without a version
+	assert.deepEqual(m.analysis({ version: () => '2.3.0' }, [{ id: '1' }])[0], { type: 'dependencies' });
+	assert.deepEqual(m.analysis({}, [{ id: '1' }])[0], { type: 'dependencies' });
+	// the graph without the environments of its nodes from flowR 2.16 on, else (and if unknown) as it is
+	assert.deepEqual(m.analysis({ version: () => '2.16.0' }, [{ id: '1' }])[2], { type: 'dataflow', environments: false });
+	assert.deepEqual(m.analysis(repl, [{ id: '1' }])[2], { type: 'dataflow' });
+	assert.deepEqual(m.analysis({ version: () => { throw new Error('no'); } }, [{ id: '1' }])[2], { type: 'dataflow' });
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mr-'));
+	const todo = m.planRequests([{ kind: 'dataflow', name: 'df', block: '1' }, { kind: 'query', name: 'q', block: '1', query: { type: 'dataflow' } }],
+		[{ id: '1', lines: ['x <- 1'] }], dir);
+	const flowr = v => ({ version: () => v, file: (d, f) => f, query: q => JSON.stringify(q) });
+	assert.deepEqual(m.requestCommands(flowr('2.16.1'), todo, dir), ['[{"type":"dataflow","environments":false},{"type":"location-map"}]', '[{"type":"dataflow"}]']);
+	assert.deepEqual(m.requestCommands(flowr('2.15.10'), todo, dir), ['[{"type":"dataflow"},{"type":"location-map"}]', '[{"type":"dataflow"}]']);
+	// a slice is its ids, flowR need not rebuild its code
+	const sliced = m.planRequests([{ kind: 'slice', name: 's', block: '1', criterion: '1@x' }], [{ id: '1', lines: ['x <- 1'] }], dir);
+	assert.deepEqual(JSON.parse(m.requestCommands(flowr('2.2.16'), sliced, dir)[0])[0], { type: 'static-slice', criteria: ['1@x'], noReconstruction: true });
+	assert.equal(m.parseCode('## magic-r block 1\n## magic-r dependencies\nx <- 1\n').blocks[0].dependencies, true);
+	// \mrFlowLine only for the listings that mark them
+	const unit = { at: l => ['3', l], source: () => 'read.csv("a")', answer: { dependencies: { read: [{ nodeId: 1 }] }, 'location-map': { map: { ids: { 1: [0, [1, 1, 1, 8]] } } } } };
+	assert.deepEqual(m.dependencyLines(unit), ['\\mrFlowLine{3@1}{read}']);
+	// statistical tests are marked as well, after the other kinds of a line
+	const tests = { dependencies: { statistics: [{ nodeId: 1 }], read: [{ nodeId: 2 }] }, 'location-map': { map: { ids: { 1: [0, [1, 1, 1, 9]], 2: [0, [2, 1, 2, 8]] } } } };
+	assert.deepEqual(m.dependencyLines({ ...unit, answer: tests }), ['\\mrFlowLine{3@2}{read}', '\\mrFlowLine{3@1}{statistics}']);
+	assert.deepEqual(m.dependencyLines({ ...unit, answer: { ...tests, dependencies: { statistics: [{ nodeId: 1 }], read: [{ nodeId: 1 }] } } }), ['\\mrFlowLine{3@1}{read}']);
+});
+
+test('the requests of the document run along with the analysis, in one start of flowR', async() => {
+	const runs = [];
+	const repl = {
+		version: () => '2.15.10', file: (dir, f) => f, query: (q, dir, f) => `:query* ${JSON.stringify(q)} file://${f}`,
+		exec(cmds) {
+			runs.push(cmds.length);
+			return cmds.map(c => c.includes('static-slice') ? { 'static-slice': { results: { '1:1': { slice: { result: [] } } } } }
+				: { dependencies: { library: [{ nodeId: 0, functionName: 'library', value: m.SENTINEL }] }, 'location-map': { map: { ids: { 0: [0, [2, 1, 2, 10]] } } } });
+		},
+		describe: () => 'fake flowR'
+	};
+	const text = await m.documentText(repl, '## magic-r block 1\nx <- 1\n## magic-r request {"kind":"slice","name":"s","block":"1","criterion":"1@x"}\n', { noCache: true }, tmp());
+	assert.deepEqual(runs, [2]);
+	assert.match(text, /\\mrFlowrRequestsFailed\{slice s: its criteria match nothing\}/);
+	// a request flowR cannot answer runs alone, so that the analysis does not fail with it
+	runs.length = 0;
+	const failing = { ...repl, exec(cmds) {
+		runs.push(cmds.length);
+		if(cmds.some(c => c.includes('static-slice'))) {
+			throw new Error('no slice');
+		}
+		return repl.exec(cmds);
+	} };
+	const text2 = await m.documentText(failing, '## magic-r block 1\nx <- 1\n## magic-r request {"kind":"slice","name":"s","block":"1","criterion":"1@x"}\n', { noCache: true }, tmp());
+	assert.match(text2, /\\mrFlowrStatus\{ok\}/);
+	assert.doesNotMatch(text2, /mrFlowrSlice/);
+	assert.match(text2, /\\mrFlowrRequestsFailed\{slice s: flowR gave no answer\}/);
+	// an error of flowR is told, a slice it could not compute keeps all lines, and no error is cached
+	const cache = tmp();
+	runs.length = 0;
+	const erring = { ...repl, answerKey: 'erring', exec(cmds) {
+		runs.push(cmds.length);
+		return cmds.map(c => c.includes('static-slice') ? { 'static-slice': { results: {}, error: 'the slicing criteria \'9@zz\' match no element of the program' } } : repl.exec([c])[0]);
+	} };
+	const code = '## magic-r block 1\nx <- 1\n## magic-r request {"kind":"slice","name":"s","block":"1","criterion":"9@zz"}\n';
+	for(let i = 0; i < 2; i++) {
+		const text3 = await m.documentText(erring, code, { cache }, tmp());
+		assert.match(text3, /\\mrFlowrRequestsFailed\{slice s: static-slice: the slicing criteria '9@zz' match no element of the program\}/);
+		assert.doesNotMatch(text3, /mrFlowrSlice/);
+	}
+	assert.ok(runs.length >= 2, 'the error was asked again');
+});
+
+test('the version of a flowR is kept in the cache while its files stay the same', () => {
+	const cache = tmp(), dir = tmp(), cli = path.join(dir, 'flowr.js');
+	const count = path.join(dir, 'count');
+	fs.writeFileSync(cli, `require('fs').appendFileSync(${JSON.stringify(count)}, 'x'); console.log('flowR: 2.15.10')`);
+	const asked = () => fs.existsSync(count) ? fs.readFileSync(count, 'utf8').length : 0;
+	assert.equal(new m.Repl('node', [process.execPath, cli], { cache, engine: 'default' }).version(), '2.15.10');
+	assert.equal(new m.Repl('node', [process.execPath, cli], { cache, engine: 'default' }).version(), '2.15.10');
+	assert.equal(asked(), 1);
+	// a new build of flowR
+	fs.writeFileSync(cli, `require('fs').appendFileSync(${JSON.stringify(count)}, 'x'); console.log('flowR: 2.16.0') `);
+	assert.equal(new m.Repl('node', [process.execPath, cli], { cache, engine: 'default' }).version(), '2.16.0');
+	assert.equal(asked(), 2);
+	// what names no file has no identity, so its version is asked every time
+	assert.equal(m.commandIdentity(['npx', 'flowr']), undefined);
+	assert.deepEqual(m.commandIdentity([process.execPath, cli]).length, 1);
+});
+
+test('an exact version switches flowR: docker image of that tag, else npm of that version', () => {
+	assert.equal(m.exactVersion('2.15.9'), '2.15.9');
+	assert.equal(m.exactVersion('=2.15.9'), '2.15.9');
+	assert.equal(m.exactVersion('>=2.15'), undefined);
+	const cache = tmp();
+	const names = opts => withEnv({ PATH: '', MAGIC_R_FLOWR: '' }, () => m.backends({ cache, ...opts })).map(b => `${b.name}${b.wanted ? `@${b.wanted}` : ''}`);
+	assert.deepEqual(names({ requireVersion: '2.15.9' }), ['node@2.15.9', 'web']);
+	assert.deepEqual(names({ requireVersion: '2.15.9', install: false }), ['web']);
+	assert.deepEqual(names({ requireVersion: '>=2.15' }), ['web']);
+	// installed before: first, running where older flowR finds tree-sitter
+	const pkg = path.join(cache, 'flowr', '2.15.9', 'node_modules');
+	for(const f of ['@eagleoutice/flowr/cli/flowr.js', '@davisvaughan/tree-sitter-r/tree-sitter-r.wasm', 'web-tree-sitter/tree-sitter.wasm']) {
+		fs.mkdirSync(path.dirname(path.join(pkg, f)), { recursive: true });
+		fs.writeFileSync(path.join(pkg, f), '');
+	}
+	const [first] = withEnv({ PATH: '', MAGIC_R_FLOWR: '' }, () => m.backends({ cache, requireVersion: '2.15.9' }));
+	assert.equal(first.argv[1], path.join(pkg, '@eagleoutice/flowr/cli/flowr.js'));
+	assert.equal(first.home(tmp()), path.join(cache, 'flowr', '2.15.9'));
+	assert.deepEqual(names({ requireVersion: '2.15.9' }), ['node', 'web']);
+	// flowR parsing with tree-sitter runs in its secure mode (no R, no network, no clipboard), with R not
+	assert.equal(new m.Repl('node', ['flowr'], { engine: 'lax' }).env().FLOWR_SECURE_MODE, '1');
+	assert.equal(new m.Repl('node', ['flowr'], { engine: 'tree-sitter' }).env().FLOWR_SECURE_MODE, '1');
+	assert.equal(new m.Repl('node', ['flowr'], { engine: 'r-shell' }).env(), undefined);
+	assert.equal(new m.Repl('node', ['flowr'], { engine: 'default' }).env(), undefined);
+	assert.equal(new m.Repl('node', ['flowr'], { engine: 'lax' }).env(m.ENGINES['r-shell']), undefined);
+	assert.equal(new m.RRepl('Rscript', { engine: 'lax' }).env(), undefined);
+	// --no-cache leaves out cached answers, not installed versions of flowR
+	const [lone] = withEnv({ PATH: '', MAGIC_R_FLOWR: '', MAGIC_R_CACHE: cache }, () => m.backends({ noCache: true, requireVersion: '2.15.9' }));
+	assert.equal(lone.argv[1], path.join(pkg, '@eagleoutice/flowr/cli/flowr.js'));
+	assert.equal(lone.cache, undefined);
+});
+
+test('every version of flowR\'s REPL reads the queries: older ones split like a shell, newer ones unquote', () => {
+	const queries = [{ type: 'call-context', callName: '^read\\.csv$|it\'s "x"' }];
+	const cmd = m.queryCommand(queries, '/tmp/a b.R');
+	const arg = cmd.slice(':query* '.length, cmd.lastIndexOf(' file://'));
+	// flowR before 2.13: quotes toggle and go, a backslash takes the next character
+	let old = '', quoted = false;
+	for(let i = 0; i < arg.length; i++) {
+		if(arg[i] === '\\') {
+			old += arg[++i];
+		} else if(arg[i] === '"' || arg[i] === '\'') {
+			quoted = !quoted;
+		} else {
+			old += arg[i];
+		}
+	}
+	assert.deepEqual(JSON.parse(old), queries);
+	// flowR 2.13.26 and later: the part in the first quotes, unescaped
+	assert.deepEqual(JSON.parse(/^"((?:[^"\\]|\\.)*)"$/.exec(arg)[1].replace(/\\(.)/g, '$1')), queries);
+	assert.ok(cmd.endsWith(' file:///tmp/a b.R'));
+	// a version printed as a link of the terminal (2.12)
+	assert.equal(m.versionIn('flowR:  \x1b]8;;https://x/v2.12.3\x072.12.3\x1b]8;;\x07 \x1b[2m(2026)\x1b[0m'), '2.12.3');
+	assert.equal(m.versionIn('Engine: r-shell\n flowR: 2.2.16'), '2.2.16');
+});
+
+test('answers of older flowR: the dependencies of 2.2, the long tags and missing parameters before 2.8', () => {
+	assert.deepEqual(m.dependenciesOf({ dependencies: { libraries: [{ nodeId: 3, functionName: 'library', libraryName: 'dplyr' }], readData: [{ nodeId: 8, source: 'a' }] } }).library,
+		[{ nodeId: 3, functionName: 'library', libraryName: 'dplyr', value: 'dplyr' }]);
+	const lines = ['f <- function(y) y + 1'];
+	const ids = { 0: [0, [1, 1, 1, 1]], 1: [0, [1, 6, 1, 13]], 2: [0, [1, 15, 1, 15]], 3: [0, [1, 18, 1, 18]] };
+	const answer = tags => ({ 'location-map': { map: { ids } }, dataflow: { graph: {
+		vertexInformation: [[0, { tag: tags.vdef, id: 0 }], [1, { tag: tags.fdef, id: 1, ...tags.params ? { params: { 2: true } } : { subflow: { graph: [2, 3] } } }],
+			[2, { tag: tags.vdef, id: 2 }], [3, { tag: 'use', id: 3 }]],
+		edgeInformation: [[0, [[1, { types: 2 }]]], [3, [[2, { types: 1 }]]]] } } });
+	const unit = a => ({ answer: a, at: l => ['1', l], source: l => lines[l - 1] });
+	const now = m.flowFacts(unit(answer({ vdef: 'vdef', fdef: 'fdef', params: true })));
+	assert.ok(now.includes('\\mrFlowDef{1@1@15}{param}'));
+	assert.deepEqual(m.flowFacts(unit(answer({ vdef: 'variable-definition', fdef: 'function-definition' }))), now);
+});
+
+test('requests on the same code share a file, one after another, so that flowR analyzes it once', () => {
+	const blocks = [{ id: '1', lines: ['x <- 1'] }, { id: '2', lines: ['y <- 2'] }];
+	const todo = m.planRequests([{ kind: 'slice', name: 'a', block: '1', criterion: '1@x' }, { kind: 'slice', name: 'b', block: '2', criterion: '1@y' },
+		{ kind: 'lint', name: 'c', block: '1' }], blocks, tmp());
+	assert.deepEqual(todo.map(t => [t.r.name, t.file]), [['a', 'r0.R'], ['c', 'r0.R'], ['b', 'r1.R']]);
+});
+
+test('requests on one code go to flowR as one query, each gets its own slice back', () => {
+	const repl = new m.Repl('fake', ['flowr'], { engine: 'default' }), dir = tmp();
+	const blocks = [{ id: '1', lines: ['x <- 1', 'y <- x'] }];
+	const todo = m.planRequests([{ kind: 'slice', name: 'a', block: '1', criterion: '2@y' }, { kind: 'slice', name: 'b', block: '1', criterion: '1@x' },
+		{ kind: 'slice', name: 'c', block: '1', criterion: '2@y' }, { kind: 'dataflow', name: 'g', block: '1' }, { kind: 'mermaid', name: 'mm', block: '1' }], blocks, dir);
+	const batches = m.batchRequests(repl, todo, dir);
+	assert.deepEqual(batches.map(b => b.members.map(x => x.t.r.name)), [['a', 'b', 'c', 'g'], ['mm']]);
+	assert.equal(batches[0].slices, 2);
+	assert.deepEqual(batches[0].queries.map(q => q.type), ['static-slice', 'location-map', 'static-slice', 'dataflow']);
+	const [a, b, c] = batches[0].members;
+	// flowR keys a slice by its criteria (older ones by its query); one without a result runs alone
+	const answer = { 'static-slice': { results: { '2@y': { slice: 1 }, '1@x': { slice: 2 } } }, dataflow: {} };
+	assert.deepEqual(m.memberAnswer(batches[0], a, answer)['static-slice'].results, { '2@y': { slice: 1 } });
+	assert.deepEqual(m.memberAnswer(batches[0], c, answer)['static-slice'].results, { '2@y': { slice: 1 } });
+	assert.equal(m.memberAnswer(batches[0], b, { 'static-slice': { results: { '2@y': {} } } }), undefined);
+	const old = { 'static-slice': { results: { [JSON.stringify(batches[0].queries[2])]: { slice: 3 } } } };
+	assert.deepEqual(m.memberAnswer(batches[0], b, old)['static-slice'].results, { [JSON.stringify(batches[0].queries[2])]: { slice: 3 } });
+	// keys of another form: by their order if all are there, else the answer does not tell
+	assert.deepEqual(m.memberAnswer(batches[0], b, { 'static-slice': { results: { s1: 1, s2: 2 } } })['static-slice'].results, { s2: 2 });
+	assert.equal(m.memberAnswer(batches[0], b, { 'static-slice': { results: { s1: 1 } } }), undefined);
+	assert.equal(m.memberAnswer(batches[0], b, undefined), undefined);
+});
+
+test('answers are cached by flowR and code: what did not change does not start flowR', async() => {
+	const cache = new m.AnswerCache(path.join(tmp(), 'answers'), 'flowr 2.15.10');
+	const runs = [];
+	const repl = { version: () => '2.15.10', answerKey: 'x', file: (dir, f) => path.join(dir, f), query: (q, d, f) => `:query* ${JSON.stringify(q)} file://${path.join(d, f)}`,
+		exec(cmds) {
+			runs.push(cmds.length);
+			return cmds.map(() => ({ dataflow: { graph: { _idMap: [1], vertexInformation: [[1, { tag: 'use', id: 1, environment: { big: true } }]] } } }));
+		} };
+	const dir = tmp();
+	fs.writeFileSync(path.join(dir, 'a.R'), 'x\n');
+	const cmd = repl.query([{ type: 'dataflow' }], dir, 'a.R');
+	const first = m.execCached(repl, [cmd], dir, cache).answers[0];
+	assert.equal(first.dataflow.graph.vertexInformation[0][1].environment.big, true);
+	// the same code in another directory: from the cache, without what magic-r does not read
+	const dir2 = tmp();
+	fs.writeFileSync(path.join(dir2, 'a.R'), 'x\n');
+	const again = m.execCached(repl, [repl.query([{ type: 'dataflow' }], dir2, 'a.R')], dir2, cache).answers[0];
+	assert.deepEqual(runs, [1]);
+	assert.deepEqual(again.dataflow.graph, { vertexInformation: [[1, { tag: 'use', id: 1 }]] });
+	// other code, another flowR: asked again
+	fs.writeFileSync(path.join(dir2, 'a.R'), 'y\n');
+	m.execCached(repl, [repl.query([{ type: 'dataflow' }], dir2, 'a.R')], dir2, cache);
+	m.execCached(repl, [cmd], dir, new m.AnswerCache(cache.dir, 'flowr 2.16.0'));
+	assert.deepEqual(runs, [1, 1, 1]);
+	// requests: each by its own query and code
+	const todo = m.planRequests([{ kind: 'slice', name: 's', block: '1', criterion: '1@x' }], [{ id: '1', lines: ['x <- 1'] }], dir);
+	const plan = m.requestPlan(repl, todo, dir, cache);
+	assert.equal(plan.cmds.length, 1);
+	plan.finish([{ 'static-slice': { results: { '1@x': { slice: 1 } } } }]);
+	assert.equal(m.requestPlan(repl, todo, dir, cache).cmds.length, 0);
+});
+
+test('a command flowR cannot answer takes no other along, whatever flowR prints for it', () => {
+	const v = 'flowR:  2.15.10 (fake)';
+	// an unknown query (older flowR prints its help), a crash after the second command
+	const out = [v, 'Unknown query type "nope"', '- {help}', v, '{"a":1}', v, 'https://mermaid.live/view#base64:x', v, '{"b":', v].join('\n');
+	assert.deepEqual(m.separatedAnswers(out, 4).answers, [null, { a: 1 }, { url: 'https://mermaid.live/view#base64:x' }, null]);
+	assert.deepEqual(m.separatedAnswers([v, '{"a":1}', v, '{"b"'].join('\n'), 3).answers, [{ a: 1 }, undefined, undefined]);
+	// only a line that starts with the version separates, not one that mentions it
+	assert.deepEqual(m.separatedAnswers([v, 'note: flowR: 1.0.0 is old', '{"a":1}', v].join('\n'), 1).answers, [{ a: 1 }]);
+	assert.equal(m.separatedAnswers('TypeError: boom', 1).parts, 0);
+	// the version line of older flowR (2.2) and the link of a terminal (2.12) separate as well
+	assert.equal(m.separatedAnswers(['Engine: tree-sitter', ' flowR: 2.2.16', ' R: none', '{"a":1}', ' flowR: 2.2.16'].join('\n'), 1).answers[0].a, 1);
+});
+
+test('a batch with one slice keeps its answer, a slice without a result in a batch runs alone', () => {
+	const repl = new m.Repl('fake', ['flowr'], { engine: 'default' }), dir = tmp();
+	const blocks = [{ id: '1', lines: ['x <- 1', 'y <- x'] }];
+	const one = m.batchRequests(repl, m.planRequests([{ kind: 'slice', name: 'a', block: '1', criterion: '9@q' }], blocks, dir), dir)[0];
+	const error = { 'static-slice': { error: 'the slicing criteria \'9@q\' match no element of the program' } };
+	assert.deepEqual(m.memberAnswer(one, one.members[0], error), error);
+	const two = m.batchRequests(repl, m.planRequests([{ kind: 'slice', name: 'a', block: '1', criterion: '9@q' },
+		{ kind: 'slice', name: 'b', block: '1', criterion: '8@q' }], blocks, dir), dir)[0];
+	assert.equal(m.memberAnswer(two, two.members[1], error), undefined);
+	// a query of the document goes alone: it may be one flowR does not know
+	const q = m.batchRequests(repl, m.planRequests([{ kind: 'slice', name: 'a', block: '1', criterion: '2@y' },
+		{ kind: 'query', name: 'q', block: '1', query: [{ type: 'nope' }] }], blocks, dir), dir);
+	assert.deepEqual(q.map(b => b.members.map(x => x.t.r.name)), [['a'], ['q']]);
+});
+
+test('each scope is a program of its own, also when its answer comes from the cache', async() => {
+	const code = '## magic-r block 1\nx <- 1\n## magic-r block 2\n## magic-r scope s\nx\n## magic-r block 3\nx\n';
+	const cache = tmp();
+	const first = await document(code, { noCache: false, cache });
+	const again = await document(code, { noCache: false, cache });
+	assert.equal(first, again);
+	// another scope changed: the first comes from the cache, still apart from the other
+	const changed = await document(code.replace('## magic-r scope s\nx\n', '## magic-r scope s\nx <- 2\nx\n'), { noCache: false, cache });
+	assert.match(changed, /\\mrLoad|\\mrFlowrStatus\{ok\}/);
+});
+
+test('files a listing sources (mrsource): analyzed before it, not shown, and first in its playground', async() => {
+	const code = '## magic-r block 1\n## magic-r source helpers.R\nlibrary(dplyr)\n## magic-r block 9\nf <- 1\n\n## magic-r source-end\ny <- f(2)\n'
+		+ '## magic-r request {"kind":"playground","name":"pg-1","block":"1","marks":["1@y"]}\n';
+	const { blocks } = m.parseCode(code);
+	assert.deepEqual(blocks.map(b => b.id), ['1']);
+	assert.deepEqual(blocks[0].sources, [{ name: 'helpers.R', lines: ['library(dplyr)', '## magic-r block 9', 'f <- 1', ''] }]);
+	assert.deepEqual(blocks[0].lines, ['y <- f(2)', '']);
+	// the loads of a file count from the first line of the listing
+	const out = await document(code);
+	assert.match(out, /\\mrLoad\{1\}\{1\}\{dplyr\}/);
+	assert.deepEqual(playground(m.playgroundTexts(code)[0]),
+		{ code: 'y <- f(2)', files: [['helpers.R', 'library(dplyr)\n## magic-r block 9\nf <- 1']], marks: '1@y', at: '1:1' });
+	// a file sourced by the listing and by one it includes is there once; another of the same name apart
+	const both = '## magic-r block 1\n## magic-r label a\n## magic-r source h.R\nf <- 1\n## magic-r source-end\nz <- 1\n'
+		+ '## magic-r block 2\n## magic-r source h.R\nf <- 1\n## magic-r source-end\n## magic-r source h.R\ng <- 2\n## magic-r source-end\ny <- f(z)\n'
+		+ '## magic-r request {"kind":"playground","name":"pg-1","block":"2","include":["a"]}\n';
+	assert.deepEqual(playground(m.playgroundTexts(both)[0]).files, [['h.R', 'f <- 1'], ['h-2.R', 'g <- 2'], ['a.R', 'z <- 1']]);
+	// a name the listing reads from the file: styled by its kind, no link
+	const lines = ['f <- function(x) x', 'f(2)'];
+	const answer = { 'location-map': { map: { ids: { 0: [0, [1, 1, 1, 1]], 1: [0, [1, 6, 1, 13]], 2: [0, [2, 1, 2, 1]] } } }, dataflow: { graph: {
+		vertexInformation: [[0, { tag: 'vdef', id: 0 }], [1, { tag: 'fdef', id: 1, params: {} }], [2, { tag: 'fcall', id: 2, name: 'f' }]],
+		edgeInformation: [[0, [[1, { types: 2 }]]], [2, [[0, { types: 1 }], [1, { types: 4 }]]]] } } };
+	assert.deepEqual(m.flowFacts({ answer, at: l => l === 2 ? ['1', 1] : undefined, source: l => lines[l - 1], sourced: l => l === 1 }), ['\\mrFlowFile{1@1@1}{fun}']);
 });

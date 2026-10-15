@@ -331,8 +331,8 @@ A copy of the package in a folder of the project needs no change of \TT{TEXINPUT
   \TT{tree-sitter}, \TT{r-shell} (needs R), and \TT{default} are the others.
 \item \option[flowr]{flowr-command}{} the flowR command line to run, e.g.\ of a local build, \option[flowr]{flowr-image}{} the
   image of docker (\cref{sec:backends}).
-\item \option[flowr]{flowr-version}{} the version flowR must have: \TT{2.15.10} exactly, or a bound such as
-  \TT{>=2.15} or \TT{<3}.
+\item \option[flowr]{flowr-version}{} the version flowR must have: \TT{2.16.1} exactly, or a bound such as
+  \TT{>=2.15} or \TT{<3}. An exact version switches flowR to that version (\cref{sec:backends}).
 \item \option[flowr]{flowr-required}{false} turn a missing or failing flowR into an error instead of a
   warning. For example, \code|flowr-backend=node, flowr-version={>=2.15}, flowr-required| requires the
   flowR command line in version 2.15 or later.
@@ -511,6 +511,13 @@ separate program, and the listings without a scope form the default one.
 \cmd[flowr]{mrScope}\TT{\{name\}} sets the scope of all listings that follow, and \cmd[flowr]{mrScope}\TT{\{\}}
 returns to the default. A name has no spaces.
 
+Files on disk take part in two ways. \code|\imr[options]{file.R}| (or
+\code|\lstinputlisting[language=lMagicR]{file.R}|) shows one as a listing like any other. The key
+\key[flowr]{mrsource}\TT{=\{file,...\}} uses files without showing them: the listing runs as if it
+\bmr{source()}d them first, names it reads from them get the style of their kind but no link, packages
+they load count as loaded, and its playground has them as files of their own. \TeX{} finds them through its
+search path, and a change of one runs flowR again. Slices, arrows, and graphs analyze only the listing.
+
 \subsection{Choosing a Backend}\label{sec:backends}
 magic-r uses the first of these backends that works, or the one the option \TT{flowr-backend} sets:
 \begin{description}
@@ -525,7 +532,19 @@ magic-r uses the first of these backends that works, or the one the option \TT{f
   browser}, with the loads found by a plain scan of the code. It knows packages, nothing else.
 \end{description}
 Packages that flowR does not know are read from an installed R. Each package is cached per version
-(\TT{\$MAGIC\_R\_CACHE}, else the user's cache).
+(\TT{\$MAGIC\_R\_CACHE}, else the user's cache), the version of each flowR for a day, and flowR's answers
+by the flowR and the code they are of: only changed listings and requests go to flowR, and a run that
+changes none does not start it. Answers unused for 30 days are removed.
+
+An exact \TT{flowr-version} (\code|flowr-version=2.16.1|) picks the docker image
+\TT{eagleoutice/flowr:2.16.1} if docker has it, else the npm package, installed into the cache once
+(\code|\mrFlowrOptions{--no-install}| forbids that, \TT{node magic-r-flowr.mjs install 2.16.1} does it
+ahead of time). The flowR of \TT{flowr-command} is used if it has that version.
+
+magic-r works with flowR 2.2 and later. Before 2.12 the links of packages come from an installed R and
+the shipped database, control flow graphs need 2.14 (magic-r warns and leaves them out). From 2.16 on,
+dataflow graphs come without environments (faster), and flowR runs in its secure mode: no R, no network,
+and no mermaid links on the clipboard. Newer versions work as long as flowR's queries keep their form.
 \begin{description}
 \item \cmd[flowr]{mrFlowrOptions}\TT{\{options\}} passes options to the script, e.g.\
   \code|\mrFlowrOptions{--timeout 300}| or \TT{--flowr <command>}, see \TT{node magic-r-flowr.mjs --help}.
@@ -565,9 +584,10 @@ flowR parses with tree-sitter's lax parser (option \TT{flowr-engine}), so a frag
 
 \subsection{Marking File Access}\label{sec:deps}
 \backends{node,docker,r} With the option \TT{dependencies} or the key \key[flowr]{mrdependencies}, lines
-that \textcolor{mrread}{read}, \textcolor{mrwrite}{write}, \textcolor{mrsource}{source}, or
-\textcolor{mrvisualize}{plot} get a band in the colors \TT{mrread}, \TT{mrwrite}, \TT{mrsource},
-and \TT{mrvisualize}, and the first line of a run names its kind at the right. Printing is no write.
+that \textcolor{mrread}{read}, \textcolor{mrwrite}{write}, \textcolor{mrsource}{source},
+\textcolor{mrvisualize}{plot}, or run a \textcolor{mrstatistics}{statistical test} get a band in the colors
+\TT{mrread}, \TT{mrwrite}, \TT{mrsource}, \TT{mrvisualize}, and \TT{mrstatistics}, and the first line of a run
+names its kind at the right. Printing is no write.
 \begin{mrdemo}[mrdependencies,mrname=files]
 raw <- read.csv("measurements.csv")
 source("helpers.R")
@@ -576,6 +596,7 @@ write.csv(clean, "clean.csv")
 plot(clean$value, type = "l")
 lines(lowess(clean$value), col = "steelblue")
 title("Measurements")
+t.test(clean$value, mu = 20)
 \end{mrdemo}
 
 \subsection{Slicing Listings}\label{sec:slices}
@@ -763,9 +784,9 @@ for a listing. By default the button is a thin gray ring,
 The button sits \cmd[flowr]{mrPlayOffset} (\TT{.6em}) right of the text. A negative offset moves it
 into the text, e.g.\ \code|\renewcommand{\mrPlayOffset}{-3em}| left of the badge of \pkg{xlistings}.
 Redefining \cmd[flowr]{mrPlaceButton}\TT{\{button\}} puts it anywhere, and the link moves with it.
-The playground code can start with code the listing does not show, e.g.\ the definitions it uses from
-an earlier listing. The key \key[flowr]{mrinclude}\TT{=\{name,...\}} puts the code of the listings
-with these names (key \TT{mrname}) first, and \key[flowr]{mrprefix}\TT{=\{code\}} adds code after them,
+The playground can start with code the listing does not show. The files of \TT{mrsource}
+(\cref{sec:flowr}) and the listings \key[flowr]{mrinclude}\TT{=\{name,...\}} names (key \TT{mrname}) open
+as files of their own (\TT{<name>.R}), analyzed first, and \key[flowr]{mrprefix}\TT{=\{code\}} adds code before the listing,
 one line per statement at each \TT{;} outside strings and brackets (\code|\%| and \code|\#| for
 \TT{\%} and \TT{\#}). The marks move down with the code:
 \begin{latex}

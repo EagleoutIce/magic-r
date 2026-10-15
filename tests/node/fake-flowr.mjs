@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A stand-in for flowR's command line: answers --version and ':query*' commands
-// like flowR does. FAKE_MAX caps wildcard searches, FAKE_MODE breaks it.
+// like flowR does. FAKE_MAX caps wildcard searches, FAKE_MODE breaks it (crash, notflowr, old, nofile).
 import fs from 'node:fs';
 
 const DB = {
@@ -16,7 +16,7 @@ if(mode === 'notflowr') {
 	process.exit(0);
 }
 if(args.includes('--version')) {
-	console.log('flowR:  2.15.10 (fake)\nengine: tree-sitter');
+	console.log('flowR:  2.16.1 (fake)\nengine: tree-sitter');
 	process.exit(0);
 }
 const cmds = args[args.indexOf('-e') + 1].split(';');
@@ -25,12 +25,24 @@ if(mode === 'crash') {
 	process.exit(1);
 }
 for(const cmd of cmds) {
+	// what flowR prints for ':version', which separates the answers of the commands
+	if(cmd === ':version') {
+		console.log('flowR:  2.16.1 (fake)');
+		continue;
+	}
 	const m = /^:query\* (.*) file:\/\/(.*)$/.exec(cmd);
 	if(!m || mode === 'old') {
 		console.log('Invalid query');
 		continue;
 	}
-	const [query] = JSON.parse(m[1]);
+	// the JSON in double quotes, its backslashes and quotes escaped, as every flowR reads it
+	const json = /^"(.*)"$/.exec(m[1]);
+	const [query] = JSON.parse(json ? json[1].replace(/\\(.)/g, '$1') : m[1]);
+	// what flowR (2.14 and later) answers when it finds no R file where it is told to look
+	if(mode === 'nofile') {
+		console.log(JSON.stringify({ [query.type]: { '.meta': { timing: 0 }, error: 'At least one request must be set to run the analysis pipeline\n Report a Bug: https://github.com/flowr-analysis/flowr/issues/new' } }));
+		continue;
+	}
 	const code = fs.readFileSync(m[2], 'utf8');
 	if(query.type === 'dependencies') {
 		const library = [], ids = {};

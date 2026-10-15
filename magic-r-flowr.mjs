@@ -4,19 +4,22 @@
 //   node magic-r-flowr.mjs document [options] <code.R> <out.cfg>
 //   node magic-r-flowr.mjs generate [options] [-o magic-r-links.cfg] [packages.txt]
 //   node magic-r-flowr.mjs verify [--prune] [cfg]
+//   node magic-r-flowr.mjs install <version>
 //
 // document: finds the packages the R code of a document loads or uses (magic-r writes one
 //   block per listing, each after a line '## magic-r block <id>') and writes their links and
 //   the block and line of every load to a file magic-r reads. With a backend that has a
 //   dataflow graph, it adds where each name is defined, the lines that read or write files,
 //   and the answers of the requests of the document ('## magic-r request {...}': graphs,
-//   slices, queries). The file always exists afterwards and starts with \mrFlowrStatus{...}.
+//   slices, queries). The lines that read, write, ... only for the blocks that mark them (a line
+//   '## magic-r dependencies'). The file always exists afterwards and starts with \mrFlowrStatus{...}.
 //   Unless --no-cleanup, it removes the side files of older versions ('<job>.mr-play-<n>.R').
 // generate: the shipped link database, for the packages of a list (one name per line).
 //   It requests every page and handles the ones that fail as verify --prune does.
 // verify: requests every documentation page of a database and reports the ones that fail;
 //   --prune moves their names to the first fallback page that works (the page of the name
 //   itself, then search.r-project.org) and removes the ones without any.
+// install: installs flowR of a version into the cache (npm), for --require-version <version>.
 //
 // flowR runs through the first backend that works (--backend picks one):
 //   node    the flowR command line: --flowr <command>, $MAGIC_R_FLOWR, 'flowr' on the PATH, or
@@ -26,15 +29,19 @@
 //   web     the signature table of https://flowr-analysis.github.io/flowr/wiki/sigdb/, with
 //           loads found by a plain scan of the code
 // Other options: --rscript <command> (R's help index improves topics, '-' to skip),
-//   --cache <dir> (default $MAGIC_R_CACHE, else the user cache), --no-cache, --timeout <s>,
-//   --require-version <v> (a backend must have flowR v: '2.15.10', '>=2.15', '<3'),
+//   --cache <dir> (default $MAGIC_R_CACHE, else the user cache: the entries of packages, the versions
+//   of flowR, and flowR's answers by the code they are of), --no-cache, --timeout <s>,
+//   --require-version <v> (a backend must have flowR v: '2.15.10', '>=2.15', '<3'; an exact version
+//   switches flowR: the docker image eagleoutice/flowr:<v>, else the npm package of that version,
+//   installed into the cache once unless --no-install),
 //   --engine lax|tree-sitter|r-shell|default (how the node and docker backends parse: lax, the
 //   default, is tree-sitter with its lax parser, which reads code with syntax errors).
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const BLOCK_MARK = /^## magic-r block (\S+)\s*$/;
@@ -235,27 +242,38 @@ export function npmFlowr(env = process.env, execPath = process.execPath) {
 	return undefined;
 }
 
-export function run(argv, { cwd, timeout, input, merged } = {}) {
+export function run(argv, { cwd, timeout, input, merged, toFile, env } = {}) {
 	// a .js file runs with this node, so a flowR checkout works without a wrapper
 	const [cmd, ...args] = /\.[cm]?js$/.test(argv[0]) ? [process.execPath, ...argv] : argv;
-	// merged: stdout and stderr in one file, in the order the program wrote them
-	const file = merged && path.join(cwd ?? os.tmpdir(), `merged-${process.pid}.out`);
+	// merged: stdout and stderr in one file, in order; toFile: stdout in a file (older flowR cuts a pipe at 8 KiB)
+	const file = (merged || toFile) && path.join(os.tmpdir(), `magic-r-${merged ? 'merged' : 'out'}-${process.pid}.out`);
 	const fd = file && fs.openSync(file, 'w');
 	try {
 		const res = spawnSync(cmd, args, {
-			cwd, input, encoding: 'utf8', timeout: (timeout ?? 120) * 1000, maxBuffer: 1 << 30, windowsHide: true,
-			shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd), ...fd ? { stdio: ['ignore', fd, fd] } : {}
+			cwd, input, env, encoding: 'utf8', timeout: (timeout ?? 120) * 1000, maxBuffer: 1 << 30, windowsHide: true,
+			shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd), ...fd ? { stdio: [input === undefined ? 'ignore' : 'pipe', fd, merged ? fd : 'pipe'] } : {}
 		});
 		if(res.error) {
 			throw new Error(`cannot run ${argv[0]}: ${res.error.code === 'ETIMEDOUT' ? 'timeout' : res.error.message}`);
 		}
-		return fd ? { ...res, stdout: fs.readFileSync(file, 'utf8'), stderr: '' } : res;
+		return fd ? { ...res, stdout: fs.readFileSync(file, 'utf8'), stderr: merged ? '' : res.stderr ?? '' } : res;
 	} finally {
 		if(fd) {
 			fs.closeSync(fd);
 			fs.rmSync(file, { force: true });
 		}
 	}
+}
+
+/** run without blocking, so that R works while flowR does: resolves with stdout and the exit status */
+export function runAsync(argv, { cwd, timeout } = {}) {
+	return new Promise(resolve => {
+		let stdout = '';
+		const child = spawn(argv[0], argv.slice(1), { cwd, timeout: (timeout ?? 120) * 1000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+		child.stdout.setEncoding('utf8').on('data', d => stdout += d);
+		child.on('error', () => resolve({ stdout, status: null }));
+		child.on('close', status => resolve({ stdout, status }));
+	});
 }
 
 /** the JSON answers in an output, one per command; an error message counts as a failed command */
@@ -279,6 +297,38 @@ export function answers(stdout) {
 }
 
 /**
+ * The answers of commands separated by ':version' (one line of every flowR), so a failing command
+ * takes no other along: JSON (or a mermaid link), null for anything else (an error), undefined if
+ * flowR stopped before (crash, timeout). `parts`: the separators seen
+ */
+export function separatedAnswers(stdout, count) {
+	const out = new Array(count).fill(undefined);
+	let parts = 0;
+	for(const line of stdout.split('\n')) {
+		if(/^\s*flowR:?\s+v?\d/.test(versionIn.plain(line))) {
+			parts++;
+			continue;
+		}
+		const k = parts - 1;
+		if(k < 0 || k >= count || out[k] !== undefined) {
+			continue;
+		}
+		const url = /(?:^|\]\()(https:\/\/mermaid\.live\/[^\s)]+)/.exec(line);
+		if(url) {
+			out[k] = { url: url[1] };
+		} else if(line.startsWith('{')) {
+			try {
+				out[k] = JSON.parse(line);
+			} catch{ /* cut */ }
+		}
+	}
+	for(let k = 0; k < count && k + 2 <= parts; k++) {
+		out[k] ??= null;
+	}
+	return { answers: out, parts };
+}
+
+/**
  * How flowR parses: tree-sitter with its lax parser (the default) reads code with syntax errors, so
  * fragments in a document do not hide the rest; r-shell needs R.
  */
@@ -288,14 +338,27 @@ export const ENGINES = {
 	'r-shell':     ['--default-engine', 'r-shell'],
 	default:       []
 };
+/** what a flowR that does not know an engine (older ones lack lax) gets instead, in order */
+const ENGINE_FALLBACKS = { lax: ['tree-sitter', 'default'], 'tree-sitter': ['default'], 'r-shell': ['default'], default: [] };
+
+/** a version of flowR in its output ('flowR: 2.15.10'), also when it is a link of the terminal */
+export function versionIn(text) {
+	return /flowR:?\s+v?(\d+\.\d+\.\d+)/.exec(versionIn.plain(text))?.[1];
+}
+versionIn.plain = text => String(text ?? '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+/** a query command every flowR reads: older ones split like a shell, so the JSON is quoted and escaped */
+export function queryCommand(queries, file) {
+	return `:query* "${JSON.stringify(queries).replace(/[\\"']/g, c => '\\' + c)}" file://${file}`;
+}
 
 /**
  * A backend that speaks flowR's REPL: `exec(cmds, dir)` runs commands (files of `dir` are named by
  * `file(name)`) and answers with one JSON object per command.
  */
 export class Repl {
-	constructor(name, argv, { timeout, mount, engine = 'lax' } = {}) {
-		Object.assign(this, { name, argv, timeout, mount, engine: ENGINES[engine] });
+	constructor(name, argv, { timeout, mount, engine = 'lax', cache, identity, home } = {}) {
+		Object.assign(this, { name, argv, timeout, mount, cache, identity, engineName: engine, engine: ENGINES[engine], fixedHome: home });
 		if(!this.engine) {
 			throw new Error(`unknown engine ${engine}`);
 		}
@@ -304,26 +367,88 @@ export class Repl {
 		return this.mount ? `${this.mount}/${name}` : path.join(dir, name).replaceAll('\\', '/');
 	}
 	query(queries, dir, name) {
-		return `:query* ${JSON.stringify(queries)} file://${this.file(dir, name)}`;
+		return queryCommand(queries, this.file(dir, name));
 	}
-	version() {
-		if(!this.cachedVersion) {
-			let res = run([...this.prefix(os.tmpdir()), ...this.engine, '--version', '--no-ansi'], { timeout: this.timeout });
-			if(!/flowR:?\s+v?\d/.test(res.stdout ?? '') && this.engine.length) {
-				// a flowR without these engines: its default one
-				this.engine = [];
-				res = run([...this.prefix(os.tmpdir()), '--version', '--no-ansi'], { timeout: this.timeout });
-			}
-			const m = /flowR:?\s+v?(\d+\.\d+\.\d+)/.exec(res.stdout ?? '');
-			if(!m) {
-				throw new Error(`${this.name}: not flowR (${texMessage((res.stdout || res.stderr || '').split('\n')[0]) || 'no output'})`);
-			}
-			this.cachedVersion = m[1];
+	/** where flowR runs: older versions look for tree-sitter in ./node_modules */
+	home(dir) {
+		if(this.fixedHome !== undefined || !Array.isArray(this.argv)) {
+			return this.fixedHome ?? dir;
 		}
+		this.fixedHome = null;
+		for(const a of this.argv.slice(0, 3)) {
+			let real;
+			try {
+				real = fs.realpathSync(path.isAbsolute(a) || /[/\\]/.test(a) ? a : onPath(a) ?? '');
+			} catch{
+				continue;
+			}
+			for(let d = path.dirname(real), k = 0; k < 8 && d !== path.dirname(d); d = path.dirname(d), k++) {
+				if(fs.existsSync(path.join(d, 'node_modules', 'web-tree-sitter'))) {
+					this.fixedHome = d;
+					return d;
+				}
+			}
+		}
+		return dir;
+	}
+	/** the version of flowR, cached by what identifies it (its files, the id of its image) */
+	version() {
+		if(this.cachedVersion) {
+			return this.cachedVersion;
+		}
+		const id = this.identity ? this.identity() : Array.isArray(this.argv) ? commandIdentity(this.argv) : undefined;
+		const key = this.cache && id && JSON.stringify([id, this.engine]);
+		const known = key && readVersions(this.cache)[key];
+		if(known && Array.isArray(known.engine)) {
+			this.engine = known.engine;
+			this.cachedVersion = known.version;
+		} else {
+			this.askVersion();
+			if(key) {
+				writeVersion(this.cache, key, { version: this.cachedVersion, engine: this.engine });
+			}
+		}
+		this.answerKey = key && JSON.stringify([id, this.cachedVersion, this.engine]);
 		return this.cachedVersion;
+	}
+	askVersion() {
+		const tmp = os.tmpdir();
+		const res = run([...this.prefix(tmp), '--version', '--no-ansi'], { cwd: this.home(tmp), timeout: this.timeout });
+		const v = versionIn(res.stdout);
+		if(!v) {
+			throw new Error(`${this.name}: not flowR (${texMessage((res.stdout || res.stderr || '').split('\n').find(l => l.trim()) ?? '') || 'no output'})`);
+		}
+		this.cachedVersion = v;
+		// the engine asked for, else the next that answers a query (older flowR lacks lax, and some
+		// accept its option for --version only)
+		const engines = [this.engineName, ...ENGINE_FALLBACKS[this.engineName] ?? []];
+		if(engines.length > 1) {
+			const dir = fs.mkdtempSync(path.join(tmp, 'magic-r-'));
+			try {
+				fs.writeFileSync(path.join(dir, 'probe.R'), 'x <- 1\n');
+				const probe = this.query([{ type: 'dataflow' }], dir, 'probe.R');
+				this.engine = ENGINES[engines.find(e => {
+					this.engine = ENGINES[e];
+					try {
+						return Boolean(this.exec([probe], dir)[0]);
+					} catch{
+						return false;
+					}
+				}) ?? engines.at(-1)];
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		}
 	}
 	prefix(dir) {
 		return typeof this.argv === 'function' ? this.argv(dir) : this.argv;
+	}
+	/**
+	 * flowR's secure mode (2.16) when it parses with tree-sitter and needs no R: no process, no network,
+	 * and the clipboard stays alone (flowR copies mermaid links there)
+	 */
+	env(engine = this.engine) {
+		return engine.includes('tree-sitter') ? { ...process.env, FLOWR_SECURE_MODE: '1' } : undefined;
 	}
 	exec(cmds, dir) {
 		if(cmds.length === 0) {
@@ -332,11 +457,12 @@ export class Repl {
 		if(cmds.some(c => c.includes(';'))) {
 			throw new Error('a flowR command must not contain ";"');
 		}
-		const res = run(this.command(cmds, dir), { cwd: dir, timeout: this.timeout });
-		const list = answers(res.stdout ?? '');
-		if(list.length !== cmds.length) {
+		const all = [':version', ...cmds.flatMap(c => [c, ':version'])];
+		const res = run(this.command(all, dir), { cwd: this.home(dir), timeout: this.timeout, toFile: true, env: this.env() });
+		const { answers: list, parts } = separatedAnswers(res.stdout ?? '', cmds.length);
+		if(parts === 0) {
 			const why = (res.stderr || res.stdout || '').split('\n').find(l => l.trim()) ?? `exit code ${res.status}`;
-			throw new Error(`${this.name}: ${list.length} of ${cmds.length} answers from flowR: ${texMessage(why)}`);
+			throw new Error(`${this.name}: no answers from flowR: ${texMessage(why)}`);
 		}
 		return list;
 	}
@@ -347,7 +473,7 @@ export class Repl {
 	raw(cmds, dir, rcode = false) {
 		const engine = rcode ? ['--default-engine', 'r-shell', '--r-session-access'] : this.engine;
 		// flowR writes its messages ('the command ... is unknown') to stderr, the answers to stdout
-		const res = run([...this.prefix(dir), ...engine, '--no-ansi', '-e', cmds.join(';')], { cwd: dir, timeout: this.timeout, merged: true });
+		const res = run([...this.prefix(dir), ...engine, '--no-ansi', '-e', cmds.join(';')], { cwd: this.home(dir), timeout: this.timeout, merged: true, env: this.env(engine) });
 		if(res.status !== 0 && !res.stdout) {
 			throw new Error(`${this.name}: ${texMessage((res.stderr || '').split('\n').find(l => l.trim()) ?? `exit code ${res.status}`)}`);
 		}
@@ -362,6 +488,13 @@ export class Repl {
 export class RRepl extends Repl {
 	constructor(rscript, opts) {
 		super('r', splitCommand(rscript), opts);
+	}
+	// R reads cmds.txt in its directory
+	home(dir) {
+		return dir;
+	}
+	env() {
+		return undefined;
 	}
 	rcode(dir, cmds) {
 		fs.writeFileSync(path.join(dir, 'cmds.txt'), cmds.join(';'));
@@ -390,8 +523,174 @@ export class RRepl extends Repl {
 	}
 }
 
+/** the versions of flowR the cache knows: identity -> {version, engine}, each kept for a day */
+const VERSIONS = 'flowr-versions.json', VERSION_AGE = 24 * 3600e3;
+function readVersions(cache) {
+	try {
+		const all = JSON.parse(fs.readFileSync(path.join(cache, VERSIONS), 'utf8'));
+		return Object.fromEntries(Object.entries(all).filter(([, v]) => Date.now() - v.at < VERSION_AGE));
+	} catch{
+		return {};
+	}
+}
+function writeVersion(cache, key, value) {
+	try {
+		fs.mkdirSync(cache, { recursive: true });
+		writeAtomic(path.join(cache, VERSIONS), JSON.stringify({ ...readVersions(cache), [key]: { ...value, at: Date.now() } }));
+	} catch{ /* only a cache */ }
+}
+
+/** flowR's answers by flowR (files, version, engine), command, and code; brotli, gone after 30 days unused */
+export class AnswerCache {
+	static FORMAT = 'a1';
+	static AGE = 30 * 24 * 3600e3;
+	static for(repl, opts) {
+		const dir = cacheDir(opts);
+		return new AnswerCache(dir && repl?.answerKey ? path.join(dir, 'answers') : undefined, repl?.answerKey);
+	}
+	constructor(dir, flowr) {
+		Object.assign(this, { dir, flowr });
+	}
+	get enabled() {
+		return this.dir !== undefined;
+	}
+	key(...parts) {
+		return crypto.createHash('sha256').update(JSON.stringify([AnswerCache.FORMAT, this.flowr, ...parts])).digest('hex');
+	}
+	get(key) {
+		if(!this.enabled || !key) {
+			return undefined;
+		}
+		const file = path.join(this.dir, `${key}.br`);
+		try {
+			const value = JSON.parse(zlib.brotliDecompressSync(fs.readFileSync(file)).toString('utf8'));
+			const now = new Date();
+			fs.utimesSync(file, now, now);
+			return value;
+		} catch{
+			return undefined;
+		}
+	}
+	set(key, value) {
+		if(!this.enabled || !key || value === undefined) {
+			return;
+		}
+		try {
+			if(!this.pruned) {
+				this.prune();
+			}
+			const data = zlib.brotliCompressSync(JSON.stringify(value), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } });
+			writeAtomic(path.join(this.dir, `${key}.br`), data);
+		} catch{ /* only a cache */ }
+	}
+	prune() {
+		this.pruned = true;
+		fs.mkdirSync(this.dir, { recursive: true });
+		for(const f of fs.readdirSync(this.dir)) {
+			try {
+				if(Date.now() - fs.statSync(path.join(this.dir, f)).mtimeMs > AnswerCache.AGE) {
+					fs.rmSync(path.join(this.dir, f), { force: true });
+				}
+			} catch{ /* gone */ }
+		}
+	}
+}
+const NO_CACHE = new AnswerCache(undefined, undefined);
+
+/** an answer without the environments of its graphs, which magic-r never reads (most of a dataflow graph) */
+export function slim(answer) {
+	const strip = graph => graph && {
+		...graph, _idMap: undefined,
+		vertexInformation: graph.vertexInformation?.map(([id, v]) => [id, { ...v, environment: undefined,
+			...v.subflow ? { subflow: { ...v.subflow, environment: undefined } } : {} }])
+	};
+	if(!answer?.dataflow?.graph && !answer?.['call-graph']?.graph) {
+		return answer;
+	}
+	return { ...answer,
+		...answer.dataflow?.graph ? { dataflow: { ...answer.dataflow, graph: strip(answer.dataflow.graph) } } : {},
+		...answer['call-graph']?.graph ? { 'call-graph': { ...answer['call-graph'], graph: strip(answer['call-graph'].graph) } } : {} };
+}
+
+/** the cache key of a command: the command without its file's place, and the code in that file */
+export function commandKey(repl, cache, cmd, dir) {
+	if(!cache.enabled || typeof repl.file !== 'function') {
+		return undefined;
+	}
+	const probe = repl.file(dir, '\0'), base = `file://${probe.slice(0, -1)}`;
+	const at = cmd.indexOf(base);
+	try {
+		return at < 0 ? undefined : cache.key('command', cmd.slice(0, at), fs.readFileSync(path.join(dir, cmd.slice(at + base.length)), 'utf8'));
+	} catch{
+		return undefined;
+	}
+}
+
+/** runs the commands not in the cache, with `extra` (not cached) in the same start: { answers, more } */
+export function execCached(repl, cmds, dir, cache = NO_CACHE, extra = []) {
+	const keys = cmds.map(c => commandKey(repl, cache, c, dir));
+	const answers = keys.map(k => cache.get(k));
+	const miss = cmds.map((_, i) => i).filter(i => answers[i] === undefined);
+	if(miss.length === 0 && extra.length === 0) {
+		return { answers, more: [] };
+	}
+	const got = repl.exec([...miss.map(i => cmds[i]), ...extra], dir);
+	miss.forEach((i, j) => {
+		answers[i] = got[j];
+		// an error may pass (a file flowR does not see)
+		if(!answerError(got[j])) {
+			cache.set(keys[i], slim(got[j]));
+		}
+	});
+	return { answers, more: got.slice(miss.length) };
+}
+
+/**
+ * What identifies the flowR of a command line: the files it names and flowR's package.json, with size
+ * and time. undefined for anything else ('npx flowr'), whose version may change any time
+ */
+export function commandIdentity(argv) {
+	const files = [], node = fs.realpathSync(process.execPath);
+	for(const [i, a] of argv.entries()) {
+		const file = path.isAbsolute(a) || a.includes('/') || a.includes('\\') ? a : onPath(a);
+		try {
+			const real = fs.realpathSync(file);
+			if(real === node || !fs.statSync(real).isFile()) {
+				continue;
+			}
+			files.push(real);
+			for(let dir = path.dirname(real), k = 0; k < 6 && dir !== path.dirname(dir); dir = path.dirname(dir), k++) {
+				if(fs.existsSync(path.join(dir, 'package.json'))) {
+					files.push(path.join(dir, 'package.json'));
+					break;
+				}
+			}
+		} catch{
+			// a word after the program that is no option and no file
+			if(i > 0 && !a.startsWith('-')) {
+				return undefined;
+			}
+		}
+	}
+	return files.length ? files.map(f => {
+		const st = fs.statSync(f);
+		return `${f}:${st.size}:${st.mtimeMs}`;
+	}) : undefined;
+}
+
+/** the dependencies in the form of current flowR (2.2 names them libraries, readData, ...) */
+export function dependenciesOf(answer) {
+	const deps = answer?.dependencies;
+	if(!deps || !['libraries', 'readData', 'writtenData', 'sourcedFiles'].some(k => k in deps)) {
+		return deps;
+	}
+	const old = (list, key) => Array.isArray(list) ? list.map(e => ({ ...e, value: e.value ?? e[key] })) : undefined;
+	return { ...deps, library: old(deps.libraries, 'libraryName'), read: old(deps.readData, 'source'),
+		write: old(deps.writtenData, 'destination'), source: old(deps.sourcedFiles, 'file') };
+}
+
 export function libraryEntries(answer) {
-	const deps = answer?.dependencies, ids = answer?.['location-map']?.map?.ids ?? {};
+	const deps = dependenciesOf(answer), ids = answer?.['location-map']?.map?.ids ?? {};
 	if(!deps || !Array.isArray(deps.library)) {
 		throw new Error('the dependencies query of flowR has no library entries');
 	}
@@ -416,6 +715,11 @@ export const LABEL_MARK = /^## magic-r label (\S+)\s*$/;
 export const SCOPE_MARK = /^## magic-r scope (\S+)\s*$/;
 export const REQUEST_MARK = /^## magic-r request (\{.*\})\s*$/;
 export const INDENT_MARK = /^## magic-r indent ([\d,]+)\s*$/;
+// a listing whose lines that read, write, ... are marked (option dependencies, key mrdependencies)
+export const DEPENDENCIES_MARK = /^## magic-r dependencies\s*$/;
+// the code of a file of the key mrsource, which the listing runs after: its lines up to source-end
+export const SOURCE_MARK = /^## magic-r source (.+?)\s*$/;
+export const SOURCE_END = /^## magic-r source-end\s*$/;
 
 /** the block a request names, by its label or id (the last one of that label), none for the document */
 export function blockOf(blocks, ref) {
@@ -425,8 +729,17 @@ export function blockOf(blocks, ref) {
 /** the blocks of the code, each with its label, and the requests of the document */
 export function parseCode(code) {
 	const blocks = [], requests = [];
-	let cur;
+	let cur, src;
 	code.split(/\r?\n/).forEach(line => {
+		// the lines of a file are code, whatever they look like
+		if(src) {
+			if(SOURCE_END.test(line)) {
+				src = undefined;
+			} else {
+				src.lines.push(line);
+			}
+			return;
+		}
 		const m = BLOCK_MARK.exec(line), label = LABEL_MARK.exec(line), req = REQUEST_MARK.exec(line), scope = SCOPE_MARK.exec(line);
 		if(m) {
 			blocks.push(cur = { id: m[1], lines: [] });
@@ -434,6 +747,11 @@ export function parseCode(code) {
 			cur.label = label[1];
 		} else if(scope && cur) {
 			cur.scope = scope[1];
+		} else if(DEPENDENCIES_MARK.test(line) && cur) {
+			cur.dependencies = true;
+		} else if(SOURCE_MARK.test(line) && cur) {
+			src = { name: SOURCE_MARK.exec(line)[1], lines: [] };
+			(cur.sources ??= []).push(src);
 		} else if(INDENT_MARK.test(line) && cur) {
 			// the indentation of each line, which flowR does not get
 			cur.indent = INDENT_MARK.exec(line)[1].split(',').map(Number);
@@ -450,7 +768,40 @@ export function parseCode(code) {
 	return { blocks, requests };
 }
 
-const ANALYSIS = [{ type: 'dependencies' }, { type: 'location-map' }, { type: 'dataflow' }];
+/** the error of a query in an answer, readable; flowR's 'At least one request must be set' means no R file */
+export function answerError(a) {
+	for(const [type, part] of Object.entries(a && typeof a === 'object' ? a : {})) {
+		if(typeof part?.error === 'string') {
+			const why = part.error.split('\n')[0].trim();
+			return `${type}: ${/^At least one request must be set/.test(why)
+				? 'flowR found no R code in the file it was given (the file is missing, or the directory is not shared with its docker container)'
+				: why}`;
+		}
+	}
+	return undefined;
+}
+
+/** the analysis of blocks: loads, locations, dataflow; reads, writes, ... only for blocks that mark them (2.4.8) */
+export function analysis(repl, group) {
+	const onlyLibrary = !group.some(b => b.dependencies) && knownSatisfies(repl, '>=2.4.8');
+	return [{ type: 'dependencies', ...onlyLibrary ? { enabledCategories: ['library'] } : {} }, { type: 'location-map' }, dataflowQuery(repl)];
+}
+
+/** the version of a flowR, undefined if it does not tell */
+function versionOf(repl) {
+	try {
+		return repl?.version?.();
+	} catch{
+		return undefined;
+	}
+}
+const knownSatisfies = (repl, req) => versionOf(repl) !== undefined && satisfies(versionOf(repl), req);
+const satisfiesSafe = (repl, req) => versionOf(repl) === undefined || satisfies(versionOf(repl), req);
+
+/** the dataflow query, without the environments (most of the answer) from flowR 2.16 on */
+export function dataflowQuery(repl) {
+	return { type: 'dataflow', ...knownSatisfies(repl, '>=2.16.0') ? { environments: false } : {} };
+}
 
 /** the blocks grouped by their scope (key mrscope), in the order the scopes first appear */
 export function scopesOf(blocks) {
@@ -471,12 +822,17 @@ export function scopesOf(blocks) {
  * the end tells; then every block of that scope is analyzed on its own and broken ones skipped.
  * Each analysis is a unit: its answer, and where a line of its file is (block and line).
  */
-export function detectWithFlowr(repl, blocks, dir) {
+export function detectWithFlowr(repl, blocks, dir, extra = [], cache = NO_CACHE) {
 	const sentinel = `library(${SENTINEL})`;
+	// the files of mrsource come before their listing; their loads count at its first line (from)
 	const scopes = scopesOf(blocks).map((group, s) => {
-		const map = [], lines = [];
+		const map = [], from = [], lines = [];
 		for(const b of group) {
 			lines.push(`## magic-r block ${b.id}`);
+			for(const l of (b.sources ?? []).flatMap(x => x.lines)) {
+				lines.push(l);
+				from[lines.length] = [b.id, 1];
+			}
 			b.lines.forEach((l, i) => {
 				lines.push(l);
 				map[lines.length] = [b.id, i + 1];
@@ -484,56 +840,103 @@ export function detectWithFlowr(repl, blocks, dir) {
 		}
 		const file = s === 0 ? 'doc.R' : `doc${s}.R`;
 		fs.writeFileSync(path.join(dir, file), `${lines.join('\n')}\n${sentinel}\n`);
-		return { group, map, lines, file };
+		return { group, map, from, lines, file };
 	});
 	const entries = [], skipped = [], units = [], broken = [];
-	repl.exec(scopes.map(sc => repl.query(ANALYSIS, dir, sc.file)), dir).forEach((answer, s) => {
-		const { group, map, lines } = scopes[s];
-		const whole = libraryEntries(answer);
+	const loadsOf = a => {
+		try {
+			return a ? libraryEntries(a) : [];
+		} catch(e) {
+			if(answerError(a)) {
+				return [];
+			}
+			throw e;
+		}
+	};
+	// the requests run along (one start of flowR less); if that fails, the analysis runs alone
+	const cmds = scopes.map(sc => repl.query(analysis(repl, sc.group), dir, sc.file));
+	let all, more;
+	try {
+		({ answers: all, more } = execCached(repl, cmds, dir, cache, extra));
+		more = extra.length ? more : undefined;
+	} catch(e) {
+		if(!extra.length) {
+			throw e;
+		}
+		all = execCached(repl, cmds, dir, cache).answers;
+	}
+	all.forEach((answer, s) => {
+		const { group, map, from, lines } = scopes[s];
+		const whole = loadsOf(answer);
 		if(whole.some(e => e.pkg === SENTINEL)) {
-			entries.push(...whole.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: map[e.line] })));
-			units.push({ answer, at: l => map[l], source: l => lines[l - 1], ids: group.map(b => b.id) });
+			entries.push(...whole.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: map[e.line] ?? from[e.line] })));
+			units.push({ answer, at: l => map[l], source: l => lines[l - 1], sourced: l => from[l] !== undefined, ids: group.map(b => b.id) });
 		} else {
 			broken.push(...group);
 		}
 	});
 	if(broken.length === 0) {
-		return { entries, skipped, units };
+		return { entries, skipped, units, more };
 	}
-	const cmds = broken.map((b, i) => {
-		fs.writeFileSync(path.join(dir, `b${i}.R`), `${b.lines.join('\n')}\n${sentinel}\n`);
-		return repl.query(ANALYSIS, dir, `b${i}.R`);
+	const pre = b => (b.sources ?? []).flatMap(x => x.lines);
+	const alone = broken.map((b, i) => {
+		fs.writeFileSync(path.join(dir, `b${i}.R`), `${[...pre(b), ...b.lines].join('\n')}\n${sentinel}\n`);
+		return repl.query(analysis(repl, [b]), dir, `b${i}.R`);
 	});
-	repl.exec(cmds, dir).forEach((a, i) => {
-		const es = a ? libraryEntries(a) : [];
-		const b = broken[i];
+	const single = execCached(repl, alone, dir, cache).answers;
+	if(units.length === 0 && all.every(a => a === null) && single.every(a => a === null)) {
+		throw new Error(`${repl.name}: flowR answered none of the analyses`);
+	}
+	single.forEach((a, i) => {
+		const es = loadsOf(a);
+		const b = broken[i], off = pre(b).length, code = [...pre(b), ...b.lines];
+		const at = l => l > off && l - off <= b.lines.length ? [b.id, l - off] : undefined;
 		if(es.some(e => e.pkg === SENTINEL)) {
-			entries.push(...es.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: e.line ? [b.id, e.line] : undefined })));
-			units.push({ answer: a, at: l => l <= b.lines.length ? [b.id, l] : undefined, source: l => b.lines[l - 1], ids: [b.id] });
+			entries.push(...es.filter(e => e.pkg !== SENTINEL).map(e => ({ ...e, at: !e.line ? undefined : at(e.line) ?? (e.line <= off ? [b.id, 1] : undefined) })));
+			units.push({ answer: a, at, source: l => code[l - 1], sourced: l => l <= off, ids: [b.id] });
 		} else {
 			skipped.push(b.id);
 		}
 	});
-	return { entries, skipped, units };
+	// nothing analyzed and flowR says why: that, not 'does not parse'
+	const why = units.length === 0 && [...all, ...single].map(answerError).find(Boolean);
+	if(why) {
+		throw new Error(`${repl.name}: ${why}`);
+	}
+	return { entries, skipped, units, more };
 }
 
 const NAME = /^(?:[A-Za-z]|\.[A-Za-z._]?)[A-Za-z0-9._]*$/;
+const TAGS = { 'function-call': 'fcall', 'variable-definition': 'vdef', 'function-definition': 'fdef' };
 const EDGE = { reads: 1, definedBy: 2, calls: 4, returns: 8, argument: 64 };
 /** a call of a replacement function, such as 'names<-' of names(x) <- v, but not an assignment */
 const isReplacement = v => v?.tag === 'fcall' && typeof v.name === 'string' && /^[^<].*<-$/.test(v.name) && v.name !== '<<-';
 /** the vertices and edges of a dataflow graph, with the location of each vertex */
-function graphOf(answer) {
+function graphOf(answer, source = () => undefined) {
 	const graph = answer?.dataflow?.graph, ids = answer?.['location-map']?.map?.ids ?? {};
 	if(!graph) {
 		return undefined;
 	}
-	const vertices = new Map(graph.vertexInformation.map(([id, v]) => [String(id), v]));
+	// flowR before 2.8 names tags in full
+	const vertices = new Map(graph.vertexInformation.map(([id, v]) => [String(id), TAGS[v.tag] ? { ...v, tag: TAGS[v.tag] } : v]));
 	const edges = new Map(graph.edgeInformation.map(([from, es]) => [String(from), es.map(([to, e]) => [String(to), e.types])]));
-	const params = new Set([...vertices.values()].flatMap(v => v.tag === 'fdef' ? Object.keys(v.params ?? {}) : []));
 	const loc = id => {
 		const l = ids[id]?.[1];
 		return Array.isArray(l) ? l : undefined;
 	};
+	// the parameters; before 2.8 flowR lists none: the definitions in the parentheses after 'function'
+	const params = new Set([...vertices].flatMap(([id, v]) => {
+		if(v.tag !== 'fdef') {
+			return [];
+		}
+		if(v.params) {
+			return Object.keys(v.params);
+		}
+		const l = loc(id), line = l && source(l[0]);
+		const open = line ? line.indexOf('(', l[3]) + 1 : 0, close = open ? closing(line, open) : undefined;
+		return close ? (v.subflow?.graph ?? []).map(String).filter(p => vertices.get(p)?.tag === 'vdef'
+			&& loc(p)?.[0] === l[0] && loc(p)[2] === l[0] && loc(p)[1] > open && loc(p)[3] < close) : [];
+	}));
 	const out = id => edges.get(id) ?? [];
 	// a definition of a function: by a function, a call that returns one ('add1 <- adder(1)'), or a
 	// name of one ('h <- adder')
@@ -574,8 +977,8 @@ function graphOf(answer) {
  * name there, \mrFlowRef{at}{kind}{at} links a use to its definition, \mrFlowExt{at} is a name of a
  * package (or R), \mrFlowArg{at} the name of an argument.
  */
-export function flowFacts({ answer, at, source }) {
-	const g = graphOf(answer);
+export function flowFacts({ answer, at, source, sourced = () => false }) {
+	const g = graphOf(answer, source);
 	if(!g) {
 		return [];
 	}
@@ -632,9 +1035,13 @@ export function flowFacts({ answer, at, source }) {
 					&& g.out(t).some(([d, types]) => types & EDGE.definedBy && d === f)).map(([t]) => ({ t, n: name(t) })))
 				.filter(d => d.n && d.n.text === n.text && place(d.n.line, d.n.col)) : [];
 			const def = pick(same) ?? (v.tag === 'use' ? pick(read) : pick(called));
+			// else one in a file of mrsource, which the document does not show
+			const inFile = def ? undefined : fileDefinition(g, id, v, n, name, sourced);
 			if(def) {
 				const k = v.tag === 'fcall' ? 'fun' : kind(def.t);
 				set(n, at => `\\mrFlowRef{${at}}{${k}}{${place(def.n.line, def.n.col)}}`);
+			} else if(inFile) {
+				set(n, at => `\\mrFlowFile{${at}}{${v.tag === 'fcall' ? 'fun' : kind(inFile)}}`);
 			} else if(v.tag === 'use' && /^\s*=(?!=)/.test(source(n.line)?.slice(n.end) ?? '')) {
 				set(n, at => `\\mrFlowArg{${at}}`);
 			} else {
@@ -645,7 +1052,21 @@ export function flowFacts({ answer, at, source }) {
 	return [...facts.values()];
 }
 
-export const DEPENDENCY_KINDS = ['read', 'write', 'source', 'visualize', 'test', 'remote'];
+/** the definition (vertex) in the sourced lines that a use reads or a call calls, of its name first */
+function fileDefinition(g, id, v, n, name, sourced) {
+	const inFile = t => {
+		const d = name(t);
+		return d && sourced(d.line) ? { t, d } : undefined;
+	};
+	const reads = g.out(id).filter(([t, types]) => types & EDGE.reads && g.vertices.get(t)?.tag === 'vdef').map(([t]) => inFile(t)).filter(Boolean);
+	const calls = v.tag !== 'fcall' ? [] : g.out(id).filter(([t, types]) => types & EDGE.calls && g.vertices.get(t)?.tag === 'fdef')
+		.flatMap(([f]) => [...g.vertices].filter(([t, w]) => w.tag === 'vdef' && g.out(t).some(([d, types]) => types & EDGE.definedBy && d === f)).map(([t]) => inFile(t)))
+		.filter(Boolean);
+	const all = [...reads, ...calls];
+	return (all.find(x => x.d.text === n.text) ?? (v.tag === 'use' ? reads[0] : undefined))?.t;
+}
+
+export const DEPENDENCY_KINDS = ['read', 'write', 'source', 'visualize', 'test', 'remote', 'statistics'];
 /** the last line of a call that starts at line l after column c (its name): where its parentheses close */
 export function callEnd(source, l, c) {
 	let depth = 0, quote = null, opened = false;
@@ -678,7 +1099,7 @@ export function callEnd(source, l, c) {
 
 /** the lines that read, write, source, ... (dependencies query): \mrFlowLine{block@line}{kind} */
 export function dependencyLines({ answer, at, source = () => undefined }) {
-	const deps = answer?.dependencies, ids = answer?.['location-map']?.map?.ids ?? {};
+	const deps = dependenciesOf(answer), ids = answer?.['location-map']?.map?.ids ?? {};
 	const out = new Map();
 	for(const kind of DEPENDENCY_KINDS) {
 		for(const e of Array.isArray(deps?.[kind]) ? deps[kind] : []) {
@@ -741,11 +1162,15 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 	};
 	[...byPos.filter(n => !hasIn.has(n.id)), ...byPos].forEach(n => state.has(n.id) || dfs(n.id));
 	// the layer: the longest path from a root without the edges back
-	const layer = new Map();
+	const layer = new Map(), aboveOf = new Map();
+	for(const e of live) {
+		const id = up ? e.to : e.from;
+		aboveOf.set(id, [...aboveOf.get(id) ?? [], e]);
+	}
 	const depthOf = id => {
 		if(!layer.has(id)) {
 			layer.set(id, 0);
-			const above = live.filter(e => (up ? e.to : e.from) === id && !back.has(up ? `${e.from}>${e.to}` : `${e.to}>${e.from}`))
+			const above = (aboveOf.get(id) ?? []).filter(e => !back.has(up ? `${e.from}>${e.to}` : `${e.to}>${e.from}`))
 				.map(e => up ? e.from : e.to);
 			layer.set(id, Math.max(0, ...above.map(a => depthOf(a) + 1)));
 		}
@@ -771,7 +1196,7 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 		const step = a < b ? 1 : -1, lane = [];
 		let prev = e.from;
 		for(let d = a + step; d !== b; d += step) {
-			const id = `~${i}.${d}`, pos = (byPos.find(n => n.id === e.from).pos + byPos.find(n => n.id === e.to).pos) / 2;
+			const id = `~${i}.${d}`, pos = (byId.get(e.from).pos + byId.get(e.to).pos) / 2;
 			points.push({ id, label: [''], pos, point: true, of: e.from });
 			layer.set(id, d);
 			near.set(id, []);
@@ -782,7 +1207,8 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 		link(prev, e.to);
 		lanes.set(e, lane);
 	});
-	const rows = Array.from({ length: depth + 1 }, (_, d) => [...byPos, ...points].filter(n => layer.get(n.id) === d));
+	const rows = Array.from({ length: depth + 1 }, () => []);
+	[...byPos, ...points].forEach(n => rows[layer.get(n.id)].push(n));
 	// stadiums and hexagons need room for their round and pointed ends
 	const width = n => n.point ? 0.1 : ({ use: 0.1, value: 0.2, fcall: 0.08, entry: 0.2, exit: 0.2, branch: 0.25, cgmain: 0.2, cgbuiltin: 0.1 }[n.kind] ?? 0)
 		+ Math.max(0.45, Math.max(...n.label.map(l => l.length)) * char + 0.26
@@ -818,22 +1244,39 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 		const ws = row.map(n => width(n) + (n.loop ? 0.6 : 0));
 		// a priority layout: in the order of the code, each node takes the place it wants (above its
 		// neighbors), or the nearest one that leaves room for the nodes between it and those placed
-		const span = (i, j) => ws[i] / 2 + ws[j] / 2 + gap * (j - i) + ws.slice(i + 1, j).reduce((p, q) => p + q, 0);
+		const pre = [0];
+		ws.forEach((w, i) => pre.push(pre[i] + w));
+		const span = (i, j) => ws[i] / 2 + ws[j] / 2 + gap * (j - i) + pre[j] - pre[i + 1];
 		const place = new Array(row.length);
+		// the bounds the placed nodes set, max(place[j] + span(j, i)) left and min(place[j] - span(i, j))
+		// right, in two Fenwick trees: rows of long graphs have thousands of points
+		const n = row.length, left = new Array(n + 1).fill(-Infinity), right = new Array(n + 1).fill(Infinity);
+		const mark = (i, at) => {
+			for(let k = i + 1; k <= n; k += k & -k) {
+				left[k] = Math.max(left[k], at + ws[i] / 2 - gap * i - pre[i + 1]);
+			}
+			for(let k = n - i; k <= n; k += k & -k) {
+				right[k] = Math.min(right[k], at - ws[i] / 2 - gap * i - pre[i]);
+			}
+		};
+		const bounds = i => {
+			let l = -Infinity, r = Infinity;
+			for(let k = i; k > 0; k -= k & -k) {
+				l = Math.max(l, left[k]);
+			}
+			for(let k = n - i - 1; k > 0; k -= k & -k) {
+				r = Math.min(r, right[k]);
+			}
+			return [l + ws[i] / 2 + gap * i + pre[i], r - ws[i] / 2 + gap * i + pre[i + 1]];
+		};
 		// nodes before the lanes of long edges, nodes with a wish before the others, then in the order of the code
 		const order = [...row.keys()].sort((i, j) => !!row[i].point - !!row[j].point
 			|| (want[i] === undefined) - (want[j] === undefined) || row[i].pos - row[j].pos);
 		for(const i of order) {
-			let lo = -Infinity, hi = Infinity;
-			place.forEach((at, j) => {
-				if(j < i) {
-					lo = Math.max(lo, at + span(j, i));
-				} else if(j > i) {
-					hi = Math.min(hi, at - span(i, j));
-				}
-			});
+			const [lo, hi] = bounds(i);
 			const d = want[i] ?? (lo > -Infinity ? lo : hi < Infinity ? hi : 0);
 			place[i] = lo > hi ? lo : Math.min(Math.max(d, lo), hi);
+			mark(i, place[i]);
 		}
 		// where a row was too tight for the wishes, its nodes move apart: nothing overlaps
 		for(let i = 1; i < row.length; i++) {
@@ -853,17 +1296,44 @@ export function layout(nodes, edges, { up = false, gap = 0.22, vgap = 0.2, char 
 	}
 	// a lane runs straight where it can: all its points move to one place (that of its source, its
 	// target, or one of its points) that is free in each of its rows
-	const busy = (d, px, self) => rows[d].some(n => !self.includes(n.id)
-		&& Math.abs(x.get(n.id) - px) < width(n) / 2 + (n.point ? 0.14 : 0.16));
+	// each row sorted by place, so a check sees only the nodes in reach
+	const reachOf = new Map([...byPos, ...points].map(n => [n.id, width(n) / 2 + (n.point ? 0.14 : 0.16)]));
+	const reach = rows.map(row => Math.max(0, ...row.map(n => reachOf.get(n.id))));
+	const sorted = rows.map(row => row.map(n => n.id).sort((p, q) => x.get(p) - x.get(q)));
+	const firstFrom = (ids, v) => {
+		let lo = 0, hi = ids.length;
+		while(lo < hi) {
+			const mid = (lo + hi) >> 1;
+			x.get(ids[mid]) < v ? lo = mid + 1 : hi = mid;
+		}
+		return lo;
+	};
+	const busy = (d, px, self) => {
+		const ids = sorted[d];
+		for(let k = firstFrom(ids, px - reach[d]); k < ids.length && x.get(ids[k]) <= px + reach[d]; k++) {
+			if(!self.has(ids[k]) && Math.abs(x.get(ids[k]) - px) < reachOf.get(ids[k])) {
+				return true;
+			}
+		}
+		return false;
+	};
+	const move = (id, to) => {
+		const ids = sorted[layer.get(id)];
+		ids.splice(ids.indexOf(id), 1);
+		x.set(id, to);
+		ids.splice(firstFrom(ids, to), 0, id);
+	};
 	for(const [e, lane] of lanes) {
+		const own = new Set(lane);
 		const base = [x.get(e.from), x.get(e.to), ...lane.map(id => x.get(id))];
 		const cost = c => lane.reduce((p, id) => p + Math.abs(x.get(id) - c), 0);
-		const cands = [...base, ...base.flatMap(b => [1, -1, 2, -2, 3, -3].map(k => b + k * 0.15))];
-		const fine = cands.filter(c => lane.every(id => !busy(layer.get(id), c, lane)));
+		const cands = [...new Set([...base, ...base.flatMap(b => [1, -1, 2, -2, 3, -3].map(k => b + k * 0.15))])];
+		const fine = c => lane.every(id => !busy(layer.get(id), c, own));
 		// the place of the source or the target first, else the one that moves the lane least
-		const best = fine.find(c => c === base[0] || c === base[1]) ?? fine.sort((p, q) => cost(p) - cost(q))[0];
+		const costs = new Map(cands.map(c => [c, cost(c)]));
+		const best = [base[0], base[1]].find(fine) ?? cands.sort((p, q) => costs.get(p) - costs.get(q)).find(fine);
 		if(best !== undefined) {
-			lane.forEach(id => x.set(id, best));
+			lane.forEach(id => move(id, best));
 		}
 	}
 	// a gap between two layers is as high as the edges that run sideways in it need
@@ -1652,13 +2122,14 @@ export function criterion(c, lines) {
 
 /**
  * The part after '#' of a link into flowR's playground: the code (base64url), marks (lines '3',
- * criteria '5@x', findings 'lint:rule'), and where the cursor is ('3:5').
+ * criteria '5@x', findings 'lint:rule'), the cursor ('3:5'), and other files ({ name, lines }, 2.16)
  */
-export function playgroundHash(lines, marks = [], at) {
+export function playgroundHash(lines, marks = [], at, files = []) {
 	const enc = s => s.replace(/[^A-Za-z0-9\-._~!$'()*,;:@/?=]/gu, c => encodeURIComponent(c));
-	const code = lines.slice(0, lines.findLastIndex(l => l.trim()) + 1).join('\n');
-	return [`c=t${Buffer.from(code).toString('base64url')}`, marks.length ? `h=${enc(marks.join(','))}` : '',
-		at ? `p=${at}` : ''].filter(Boolean).join('&');
+	const text = ls => ls.slice(0, ls.findLastIndex(l => l.trim()) + 1).join('\n');
+	const pack = t => `t${Buffer.from(t).toString('base64url')}`;
+	return [`c=${pack(text(lines))}`, files.length ? `o=${pack(JSON.stringify(files.map(f => [f.name, text(f.lines)])))}` : '',
+		marks.length ? `h=${enc(marks.join(','))}` : '', at ? `p=${at}` : ''].filter(Boolean).join('&');
 }
 
 /**
@@ -1779,33 +2250,46 @@ export function playgroundTexts(code) {
 		// the packages the listing attaches without showing it (key mrlibrary) come first, the marks move down
 		const libs = [].concat(r.library ?? []).map(String).filter(p => /^[A-Za-z][A-Za-z0-9.]*$/.test(p))
 			.filter(p => !lines.some(l => new RegExp(`\\b(library|require)\\(\\s*["']?${p.replace(/\./g, '\\.')}["']?\\s*[,)]`).test(l)));
-		// then the code of the listings the key mrinclude names, then the code of the key mrprefix,
-		// neither of which the listing shows
-		const included = [].concat(r.include ?? []).map(String).flatMap(n => {
-			const inc = blockOf(blocks, n);
-			const ls = inc ? [...sideLines({ file: r.file, part: inc.id }) ?? inc.lines] : [];
-			// without the empty lines at its end
-			while(ls.length > 0 && ls.at(-1).trim() === '') {
-				ls.pop();
+		// files of mrsource and listings of mrinclude ('<name>.R') are files of their own, run first;
+		// mrprefix comes before the listing
+		const files = [];
+		const add = (name, ls) => {
+			if(files.some(f => f.name === name && f.lines.join('\n') === ls.join('\n'))) {
+				return;
 			}
-			return ls;
-		});
-		const pre = [...libs.map(p => `library(${p})`), ...included, ...prefixLines(r.prefix)];
+			let unique = name;
+			for(let k = 2; files.some(f => f.name === unique); k++) {
+				unique = name.replace(/(\.[^.]*)?$/, `-${k}$1`);
+			}
+			files.push({ name: unique, lines: ls });
+		};
+		const sources = x => (x?.sources ?? []).forEach(f => add(String(f.name), f.lines));
+		sources(b);
+		for(const n of [].concat(r.include ?? []).map(String)) {
+			const inc = blockOf(blocks, n);
+			if(inc) {
+				sources(inc);
+				add(`${n}.R`, sideLines({ file: r.file, part: inc.id }) ?? inc.lines);
+			}
+		}
+		const pre = [...libs.map(p => `library(${p})`), ...prefixLines(r.prefix)];
 		const shifted = marks.map(c => c.replace(/^\d+/, n => String(Number(n) + pre.length)));
-		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...pre, ...lines], shifted)}}`];
+		// the cursor on the first criterion: the page opens on its slice
+		const at = shifted.map(c => place(c, [...pre, ...lines])).find(Boolean);
+		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...pre, ...lines], shifted, at?.join(':'), files)}}`];
 	});
 }
 
 const REQUESTS = {
-	dataflow:       () => [{ type: 'dataflow' }, { type: 'location-map' }],
+	dataflow:       (r, flowr) => [dataflowQuery(flowr), { type: 'location-map' }],
 	'call-graph':   () => [{ type: 'call-graph' }, { type: 'location-map' }],
 	// a link to the graph on mermaid.live, as flowR's REPL gives it
 	mermaid:        r => ({ 'call-graph': ':query [{"type":"call-graph"}]', 'control-flow': ':controlflowbb*' }[r.graph] ?? ':dataflow*'),
 	'control-flow': () => [{ type: 'control-flow', config: { simplificationPasses: ['unique-cf-sets', 'to-basic-blocks'] } }, { type: 'location-map' }],
-	slice:          r => [{ type: 'static-slice', criteria: [].concat(r.criterion ?? []).map(c => String(c).trim()) }, { type: 'location-map' }],
+	slice:          r => [{ type: 'static-slice', criteria: [].concat(r.criterion ?? []).map(c => String(c).trim()), noReconstruction: true }, { type: 'location-map' }],
 	query:          r => Array.isArray(r.query) ? r.query : [r.query],
 	lint:           r => [{ type: 'linter', ...Array.isArray(r.rules) && r.rules.length ? { rules: r.rules } : {} }],
-	arrows:         () => [{ type: 'dataflow' }, { type: 'location-map' }]
+	arrows:         (r, flowr) => [dataflowQuery(flowr), { type: 'location-map' }]
 };
 
 /**
@@ -2072,13 +2556,14 @@ export function instanceRepl(spec, opts = {}) {
 	if(m[1] === 'docker' && (!docker || run([docker, 'image', 'inspect', m[2]], { timeout: 20 }).status !== 0)) {
 		throw new Error(`docker has no image ${m[2]} (docker pull ${m[2]})`);
 	}
-	const repl = backends({ ...opts, backend: m[1], ...m[1] === 'docker' ? { image: m[2] } : { flowr: m[2] } })[0];
+	const repl = backends({ ...opts, requireVersion: undefined, backend: m[1], ...m[1] === 'docker' ? { image: m[2] } : { flowr: m[2] } })[0];
 	repl.version();
 	return repl;
 }
 
-export function requestTexts(repl, requests, blocks, dir, opts = {}) {
-	const todo = [];
+/** the requests flowR can answer, each with the code it is asked on, written to a file of `dir` */
+export function planRequests(requests, blocks, dir) {
+	const todo = [], files = new Map();
 	for(let r of requests) {
 		if(!REQUESTS[r.kind] || typeof r.name !== 'string' || !/^[\w.:-]+$/.test(r.name)) {
 			continue;
@@ -2108,15 +2593,132 @@ export function requestTexts(repl, requests, blocks, dir, opts = {}) {
 		}
 		const crit = c => [].concat(c ?? []).map(x => criterion(x, lines));
 		r = { ...r, criterion: crit(r.criterion), criteria: crit(r.criteria) };
-		const file = `r${todo.length}.R`;
-		fs.writeFileSync(path.join(dir, file), lines.join('\n') + '\n');
+		// requests on the same code share a file, which flowR (2.13) analyzes once for all
+		const text = lines.join('\n') + '\n';
+		let file = files.get(text);
+		if(!file) {
+			file = `r${files.size}.R`;
+			files.set(text, file);
+			fs.writeFileSync(path.join(dir, file), text);
+		}
 		todo.push({ r, lines, shown, file, indent: block?.indent });
 	}
+	const order = [...files.values()];
+	return todo.map((t, i) => [t, i]).sort(([a, i], [b, j]) => order.indexOf(a.file) - order.indexOf(b.file) || i - j).map(([t]) => t);
+}
+
+
+/** the commands of planned requests for one flowR */
+export function requestCommands(flowr, todo, dir) {
+	return todo.map(({ r, file }) => {
+		const q = REQUESTS[r.kind](r, flowr);
+		return typeof q === 'string' ? `${q} file://${flowr.file(dir, file)}` : flowr.query(q, dir, file);
+	});
+}
+
+const requestQuery = (t, flowr) => REQUESTS[t.r.kind](t.r, flowr);
+
+/**
+ * The requests on one file in one query where their queries fit: of one type only the same, but any
+ * slices (memberAnswer). A REPL command, a query of the document, or two queries of a type go alone.
+ * Each batch: { cmd, slices, members: [{ t, slice }] }
+ */
+export function batchRequests(flowr, todo, dir) {
+	const batches = [], open = new Map(), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+	for(const t of todo) {
+		const q = requestQuery(t, flowr), at = `file://${flowr.file(dir, t.file)}`;
+		if(typeof q === 'string' || t.r.kind === 'query' || new Set(q.map(x => x.type)).size !== q.length) {
+			batches.push({ cmd: typeof q === 'string' ? `${q} ${at}` : flowr.query(q, dir, t.file), members: [{ t }], alone: true });
+			continue;
+		}
+		const fits = b => q.every(x => x.type === 'static-slice' || b.queries.every(y => y.type !== x.type || same(x, y)));
+		let b = (open.get(t.file) ?? []).find(fits);
+		if(!b) {
+			b = { file: t.file, queries: [], members: [] };
+			open.set(t.file, [...open.get(t.file) ?? [], b]);
+			batches.push(b);
+		}
+		const m = { t };
+		for(const x of q) {
+			if(!b.queries.some(y => same(x, y))) {
+				b.queries.push(x);
+			}
+			if(x.type === 'static-slice') {
+				m.slice = b.queries.filter(y => y.type === 'static-slice').findIndex(y => same(x, y));
+			}
+		}
+		b.members.push(m);
+	}
+	for(const b of batches.filter(b => !b.alone)) {
+		b.cmd = flowr.query(b.queries, dir, b.file);
+		b.slices = b.queries.filter(y => y.type === 'static-slice').length;
+	}
+	return batches;
+}
+
+/**
+ * A request's own slice of a batch's answer: keyed by criteria ('3@x,5@y'), by query JSON in older
+ * flowR, else by order if all are there. undefined if the answer does not tell
+ */
+export function memberAnswer(b, m, a) {
+	if(!a || m.slice === undefined || b.slices === 1) {
+		return a;
+	}
+	const ss = a['static-slice'], results = ss?.results ?? {};
+	const all = b.queries.filter(y => y.type === 'static-slice'), keys = Object.keys(results);
+	const named = q => [q.criteria.join(','), JSON.stringify(q)].find(k => k in results);
+	const key = named(all[m.slice]) ?? (keys.length === b.slices && !all.some(named) ? keys[m.slice] : undefined);
+	// without a result of its own it runs alone: an error of the batch may be another slice's
+	return key === undefined ? undefined : { ...a, 'static-slice': { ...ss, results: { [key]: results[key] }, error: undefined } };
+}
+
+/** cached answers (got) and the commands for the rest (cmds); `finish` keeps their answers, returns what failed */
+export function requestPlan(flowr, todo, dir, cache = NO_CACHE) {
+	const got = new Map(), keys = new Map(), misses = [];
+	for(const t of todo) {
+		let key;
+		try {
+			key = cache.enabled ? cache.key('request', requestQuery(t, flowr), fs.readFileSync(path.join(dir, t.file), 'utf8')) : undefined;
+		} catch{ /* no file */ }
+		const hit = cache.get(key);
+		if(hit === undefined) {
+			keys.set(t, key);
+			misses.push(t);
+		} else {
+			got.set(t, hit);
+		}
+	}
+	const batches = batchRequests(flowr, misses, dir);
+	return {
+		got, cmds: batches.map(b => b.cmd),
+		finish(answers) {
+			const failed = [];
+			batches.forEach((b, i) => b.members.forEach(m => {
+				const a = answers?.[i] === null && b.members.length > 1 ? undefined : memberAnswer(b, m, answers?.[i]);
+				if(a === undefined) {
+					failed.push(m.t);
+				} else {
+					this.keep(m.t, a);
+				}
+			}));
+			return failed;
+		},
+		keep(t, a) {
+			got.set(t, a);
+			if(!answerError(a)) {
+				cache.set(keys.get(t), t.r.kind === 'query' || !a ? a : slim(a));
+			}
+		}
+	};
+}
+
+/** the answers to the requests, by the flowR each names; `answered`: those that ran along with the analysis */
+export function requestTexts(repl, requests, blocks, dir, opts = {}, todo = planRequests(requests, blocks, dir), answered = new Map()) {
 	// the requests of each flowR run together; one that flowR cannot answer must not take the others
 	// along: then each runs alone
 	const out = [];
 	for(const spec of new Set(todo.map(t => t.r.instance ?? ''))) {
-		const mine = todo.filter(t => (t.r.instance ?? '') === spec);
+		let mine = todo.filter(t => (t.r.instance ?? '') === spec);
 		let flowr = repl;
 		if(spec) {
 			try {
@@ -2127,26 +2729,51 @@ export function requestTexts(repl, requests, blocks, dir, opts = {}) {
 				continue;
 			}
 		}
-		const cmds = mine.map(({ r, file }) => {
-			const q = REQUESTS[r.kind](r);
-			return typeof q === 'string' ? `${q} file://${flowr.file(dir, file)}` : flowr.query(q, dir, file);
+		mine = mine.filter(t => {
+			const min = MIN_VERSIONS[t.r.kind];
+			if(min && !satisfiesSafe(flowr, `>=${min}`)) {
+				out.push(`\\mrFlowrRequestsFailed{${t.r.kind} ${texText(t.r.name)} needs flowR ${min} or later}`);
+				return false;
+			}
+			return true;
 		});
-		let answers;
-		try {
-			answers = flowr.exec(cmds, dir);
-		} catch{
-			answers = cmds.map(c => {
-				try {
-					return flowr.exec([c], dir)[0];
-				} catch{
-					return undefined;
-				}
-			});
-		}
-		mine.forEach((t, i) => out.push(...answerText(t, answers[i])));
+		const got = new Map(spec ? [] : [...answered].filter(([t]) => mine.includes(t)));
+		// a request a batch could not answer runs alone
+		const plan = requestPlan(flowr, mine.filter(t => !got.has(t)), dir, AnswerCache.for(flowr, opts));
+		const each = cmds => {
+			try {
+				return flowr.exec(cmds, dir);
+			} catch{
+				return cmds.map(c => {
+					try {
+						return flowr.exec([c], dir)[0];
+					} catch{
+						return undefined;
+					}
+				});
+			}
+		};
+		const failed = plan.cmds.length ? plan.finish(each(plan.cmds)) : [];
+		const alone = failed.length ? each(requestCommands(flowr, failed, dir)) : [];
+		failed.forEach((t, i) => alone[i] === undefined ? plan.got.set(t, undefined) : plan.keep(t, alone[i]));
+		mine.forEach(t => {
+			const a = got.get(t) ?? plan.got.get(t);
+			// a slice holds its criterion: an empty one (older flowR, criteria that match nothing) failed
+			const why = !a ? 'flowR gave no answer' : answerError(a) ?? (t.r.kind === 'slice' && sliceLines(a).length === 0 ? 'its criteria match nothing' : undefined);
+			if(why) {
+				out.push(`\\mrFlowrRequestsFailed{${t.r.kind} ${texText(t.r.name)}: ${texMessage(why)}}`);
+			}
+			// a failed slice keeps all lines
+			if(!(why && t.r.kind === 'slice')) {
+				out.push(...answerText(t, a));
+			}
+		});
 	}
 	return out;
 }
+
+/** answers magic-r reads only from newer flowR (control flow graphs changed in 2.14) */
+const MIN_VERSIONS = { 'control-flow': '2.14' };
 
 /** what magic-r reads of the answer to a request, by its kind (a query, else) */
 const ANSWERS = {
@@ -2169,7 +2796,14 @@ const ANSWERS = {
 	},
 	query:          ({ r }, a) => [`\\mrFlowrResult{${r.name}}{${texText(pointer(a, r.path ?? ''))}}`]
 };
-const answerText = (t, a) => a ? ANSWERS[t.r.kind](t, a).filter(Boolean) : [];
+/** an answer magic-r cannot read costs only its own request */
+const answerText = (t, a) => {
+	try {
+		return a ? ANSWERS[t.r.kind](t, a).filter(Boolean) : [];
+	} catch{
+		return [];
+	}
+};
 
 /** whether a version satisfies a requirement: '2.15.10' (exactly), '>=2.15', '>2', '<=3', '<3' */
 export function satisfies(version, req) {
@@ -2268,6 +2902,9 @@ export function exportsWithFlowr(repl, wanted, dir) {
 	return new Map([...result].map(([p, r]) => [p, { version: r.version, fns: [...r.fns.values()] }]));
 }
 
+/** the exports flowR knows; none before 2.12 (no signature query): then R and the shipped database tell */
+const exportsOrNothing = (repl, wanted, dir) => satisfiesSafe(repl, '>=2.12') ? exportsWithFlowr(repl, wanted, dir) : new Map();
+
 /** the web backend: the table the signature browser embeds, kept for a week */
 export class Web {
 	constructor({ cache, page = SIGDB_PAGE, timeout } = {}) {
@@ -2335,80 +2972,48 @@ export function parseTable(text) {
 	return { byName, stamp: packages.length ? `${packages.length} packages` : '' };
 }
 
-/** topics from the help index of installed packages: pkg -> Map(alias -> topic) */
-export function helpTopics(rscript, pkgs) {
-	const out = new Map();
+/**
+ * What an installed R knows of packages, in one run that does not block: help topics (pkg ->
+ * Map(alias -> topic), `data`: its data sets), exports (pkg -> {version, fns, generics, data}; base:
+ * its whole environment), and DESCRIPTION versions ('7.3-65')
+ */
+export async function rPackages(rscript, pkgs) {
+	const topics = new Map(), exports = new Map(), versions = new Map();
 	if(!rscript || pkgs.length === 0) {
-		return out;
+		return { topics, exports, versions };
 	}
-	// the aliases of the help pages, and the data sets, which are no exports ('mtcars')
-	const code = `for (p in commandArgs(TRUE)) { f <- system.file("help", "aliases.rds", package = p)
-		if (nzchar(f)) { a <- readRDS(f); cat(paste(p, names(a), a, sep = "\\t"), sep = "\\n")
-			d <- utils::data(package = p)$results[, "Item"]
-			if (length(d)) cat(paste(p, "", sub(" .*", "", d), sep = "\\t"), sep = "\\n") } }`;
-	try {
-		const res = run([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 60 });
-		for(const line of (res.stdout ?? '').split('\n')) {
-			const [p, alias, topic] = line.split('\t');
-			const help = out.get(p) ?? out.set(p, new Map()).get(p);
-			if(alias && topic) {
-				help.set(alias, topic);
-			} else if(topic) {
-				(help.data ??= []).push(topic);
-			}
-		}
-	} catch{ /* R is optional */ }
-	return out;
-}
-
-/** the exports of installed packages (for base, its whole environment, with the primitives): pkg -> {version, fns} */
-export function rExports(rscript, pkgs) {
-	const out = new Map();
-	if(!rscript || pkgs.length === 0) {
-		return out;
-	}
-	const code = `for (p in commandArgs(TRUE)) if (nzchar(system.file(package = p))) {
-		x <- if (p == "base") ls(baseenv(), all.names = TRUE) else tryCatch(getNamespaceExports(p), error = function(e) character())
-		env <- if (p == "base") baseenv() else asNamespace(p)
-		internal <- tryCatch(tools:::.get_internal_S3_generics(), error = function(e) .S3PrimitiveGenerics)
+	const code = `internal <- tryCatch(tools:::.get_internal_S3_generics(), error = function(e) .S3PrimitiveGenerics)
 		dispatches <- function(e) is.call(e) && (identical(e[[1L]], as.name("UseMethod")) || any(vapply(as.list(e), dispatches, logical(1))))
-		g <- vapply(x, function(n) tryCatch({ f <- get(n, envir = env)
-			if (!is.function(f)) "d" else if (n %in% internal || dispatches(body(f))) "g" else "" }, error = function(e) ""), character(1))
-		cat(paste(p, packageDescription(p)$Version, x, g, sep = "\t"), sep = "\n") }`;
-	try {
-		const res = run([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 120 });
-		for(const line of (res.stdout ?? '').split('\n')) {
-			const [p, version, name, generic] = line.split('\t');
-			if(name) {
-				const e = out.get(p) ?? out.set(p, { version, fns: [], generics: [], data: [] }).get(p);
-				e.fns.push({ name });
-				if(generic === 'g') {
-					e.generics.push(name);
-				} else if(generic === 'd') {
-					e.data.push(name);
-				}
+		for (p in commandArgs(TRUE)) if (nzchar(system.file(package = p))) {
+			f <- system.file("help", "aliases.rds", package = p)
+			if (nzchar(f)) { a <- readRDS(f); cat(paste("H", p, names(a), a, sep = "\t"), sep = "\n")
+				d <- utils::data(package = p)$results[, "Item"]
+				if (length(d)) cat(paste("H", p, "", sub(" .*", "", d), sep = "\t"), sep = "\n") }
+			x <- if (p == "base") ls(baseenv(), all.names = TRUE) else tryCatch(getNamespaceExports(p), error = function(e) character())
+			env <- if (p == "base") baseenv() else asNamespace(p)
+			g <- vapply(x, function(n) tryCatch({ f <- get(n, envir = env)
+				if (!is.function(f)) "d" else if (n %in% internal || dispatches(body(f))) "g" else "" }, error = function(e) ""), character(1))
+			cat(paste("E", p, packageDescription(p)$Version, x, g, sep = "\t"), sep = "\n") }`;
+	const res = await runAsync([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 120 });
+	for(const line of res.stdout.split('\n')) {
+		const [kind, p, a, b, c] = line.split('\t');
+		if(kind === 'H') {
+			const help = topics.get(p) ?? topics.set(p, new Map()).get(p);
+			if(a && b) {
+				help.set(a, b);
+			} else if(b) {
+				(help.data ??= []).push(b);
+			}
+		} else if(kind === 'E') {
+			versions.set(p, a);
+			if(b) {
+				const e = exports.get(p) ?? exports.set(p, { version: a, fns: [], generics: [], data: [] }).get(p);
+				e.fns.push({ name: b });
+				({ g: e.generics, d: e.data })[c]?.push(b);
 			}
 		}
-	} catch{ /* R is optional */ }
-	return out;
-}
-
-/** the versions of installed packages as their DESCRIPTION has them ('7.3-65'): pkg -> version */
-export function rVersions(rscript, pkgs) {
-	const out = new Map();
-	if(!rscript || pkgs.length === 0) {
-		return out;
 	}
-	const code = `for (p in commandArgs(TRUE)) if (nzchar(system.file(package = p))) cat(p, "\t", packageDescription(p)$Version, "\n", sep = "")`;
-	try {
-		for(const line of (run([...splitCommand(rscript), '--vanilla', '-e', code, '--args', ...pkgs], { timeout: 60 }).stdout ?? '').split('\n')) {
-			const [p, v] = line.split('\t');
-			if(v) {
-				out.set(p, v.trim());
-			}
-		}
-	} catch{ /* R is optional */ }
-	return out;
+	return { topics, exports, versions };
 }
 
 /**
@@ -2453,34 +3058,108 @@ export function cacheDir(opts) {
 /** the backends to try, in order */
 export function backends(opts) {
 	const timeout = opts.timeout, kinds = opts.backend && opts.backend !== 'auto' ? [opts.backend] : ['node', 'docker', 'r', 'web'];
+	const cache = cacheDir(opts), exact = exactVersion(opts.requireVersion);
+	// installed versions of flowR are no cached answers: --no-cache uses them too
+	const installs = cache ?? cacheDir({ ...opts, noCache: false });
 	const out = [];
 	for(const kind of kinds) {
 		if(kind === 'node') {
+			const installed = exact && npmInstalled(installs, exact);
+			if(installed) {
+				out.push(new Repl('node', [process.execPath, installed], { timeout, engine: opts.engine, cache }));
+			}
 			const cmd = opts.flowr ?? process.env.MAGIC_R_FLOWR ?? onPath('flowr');
 			// an empty $MAGIC_R_FLOWR means no command line, not 'look for one'
 			const argv = cmd ? splitCommand(cmd) : cmd === undefined ? npmFlowr() : undefined;
 			if(argv) {
-				out.push(new Repl('node', argv, { timeout, engine: opts.engine }));
+				out.push(new Repl('node', argv, { timeout, engine: opts.engine, cache }));
 			}
 		} else if(kind === 'docker') {
-			const image = opts.image ?? 'eagleoutice/flowr:latest', docker = onPath('docker');
-			// an image docker already has: pulling 700 MB in the middle of a LaTeX run is no option
-			if(docker && (opts.backend === 'docker' || run([docker, 'image', 'inspect', image], { timeout: 20 }).status === 0)) {
+			const image = opts.image ?? `eagleoutice/flowr:${exact ?? 'latest'}`, docker = onPath('docker');
+			if(docker) {
 				const user = process.getuid ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
-				out.push(new Repl('docker', dir => [docker, 'run', '--rm', '-i', ...user, '-v', `${dir}:/work`, image],
-					{ timeout, mount: '/work', engine: opts.engine }));
+				// the image id tells the version; a missing image only for an explicit backend (no 700 MB pull mid-run)
+				const identity = () => {
+					const res = run([docker, 'image', 'inspect', '--format', '{{.Id}}', image], { timeout: 20 });
+					if(res.status !== 0 && opts.backend !== 'docker') {
+						throw new Error(`docker: no image ${image} (docker pull ${image})`);
+					}
+					return res.status === 0 ? [res.stdout.trim()] : undefined;
+				};
+				out.push(new Repl('docker', dir => [docker, 'run', '--rm', '-i', ...user, '-e', 'FLOWR_SECURE_MODE', '-v', `${dir}:/work`, image],
+					{ timeout, mount: '/work', engine: opts.engine, cache, identity }));
 			}
 		} else if(kind === 'r') {
 			if(opts.rscript) {
 				out.push(new RRepl(opts.rscript, { timeout }));
 			}
 		} else if(kind === 'web') {
-			out.push(new Web({ cache: cacheDir(opts), timeout }));
+			out.push(new Web({ cache, timeout }));
 		} else {
 			throw new Error(`unknown backend ${kind}`);
 		}
 	}
+	// else that version from npm, before the web backend
+	if(exact && opts.install !== false && kinds.includes('node') && !npmInstalled(installs, exact)) {
+		const web = out.findIndex(b => b instanceof Web);
+		out.splice(web < 0 ? out.length : web, 0, new NpmRepl(exact, { timeout, engine: opts.engine, cache, installs }));
+	}
 	return out;
+}
+
+/** the version of a requirement that names exactly one ('2.15.10', '=2.15.10'), else undefined */
+export function exactVersion(req) {
+	return /^\s*=?\s*v?(\d+\.\d+\.\d+)\s*$/.exec(req ?? '')?.[1];
+}
+
+/** cli/flowr.js of flowR of a version that magic-r installed into its cache, else undefined */
+export function npmInstalled(cache, version) {
+	const cli = path.join(cache, 'flowr', version, 'node_modules', '@eagleoutice', 'flowr', 'cli', 'flowr.js');
+	return fs.existsSync(cli) ? cli : undefined;
+}
+
+/** installs flowR of a version into the cache with npm */
+export function installFlowr(cache, version, timeout) {
+	const npm = onPath('npm');
+	if(!npm) {
+		throw new Error(`no npm to install flowR ${version}`);
+	}
+	const dir = path.join(cache, 'flowr', version), part = `${dir}.part-${process.pid}`;
+	fs.mkdirSync(part, { recursive: true });
+	try {
+		const res = run([npm, 'install', '--prefix', part, '--no-save', '--no-audit', '--no-fund', '--omit=dev', `@eagleoutice/flowr@${version}`],
+			{ timeout: Math.max(timeout ?? 0, 600) });
+		if(res.status !== 0) {
+			const why = (res.stderr || res.stdout || '').split('\n').find(l => /ERR|error/.test(l)) ?? `exit code ${res.status}`;
+			throw new Error(`npm cannot install flowR ${version}: ${texMessage(why)}`);
+		}
+		fs.rmSync(dir, { recursive: true, force: true });
+		fs.renameSync(part, dir);
+	} finally {
+		fs.rmSync(part, { recursive: true, force: true });
+	}
+	const cli = npmInstalled(cache, version);
+	if(!cli) {
+		throw new Error(`npm installed flowR ${version} without cli/flowr.js`);
+	}
+	return cli;
+}
+
+/** flowR of a version from npm, installed into the cache when it is first asked for */
+export class NpmRepl extends Repl {
+	constructor(version, opts) {
+		super('node', undefined, opts);
+		this.wanted = version;
+		this.installs = opts.installs ?? opts.cache;
+	}
+	version() {
+		if(!this.argv) {
+			console.error(`magic-r: installing flowR ${this.wanted} into ${this.installs} (once)`);
+			const cli = installFlowr(this.installs, this.wanted, this.timeout);
+			this.argv = [process.execPath, cli];
+		}
+		return super.version();
+	}
 }
 
 /** runs f with the first backend that works; the failures of the others explain a total failure */
@@ -2518,7 +3197,8 @@ export async function packageEntries(backend, wanted, opts, dir) {
 	}
 	// the format of the entries is part of the key: a new one makes the old cache unused
 	const key = `${web ? 'web' : `flowr-${backend.version()}`}-${CACHE_FORMAT}`;
-	const file = w => cache && w.version ? path.join(cache, key, `${w.pkg}@${w.version}.cfg`) : undefined;
+	// by the version flowR reports, by name if it reports none (older flowR)
+	const file = w => cache && path.join(cache, key, w.version ? `${w.pkg}@${w.version}.cfg` : `${w.pkg}.cfg`);
 	const entries = new Map(), missing = [];
 	for(const w of wanted) {
 		const f = file(w);
@@ -2529,17 +3209,17 @@ export async function packageEntries(backend, wanted, opts, dir) {
 		}
 	}
 	if(missing.length) {
-		const found = web ? new Map(missing.map(w => [w.pkg, backend.table.byName.get(w.pkg)]).filter(([, v]) => v))
-			: exportsWithFlowr(backend, missing, dir);
+		// R works while flowR searches
+		const r = rPackages(opts.rscript, missing.map(w => w.pkg));
+		const found = await Promise.resolve().then(() => web ? new Map(missing.map(w => [w.pkg, backend.table.byName.get(w.pkg)]).filter(([, v]) => v))
+			: exportsOrNothing(backend, missing, dir)).finally(() => r);
+		const { topics, exports: installed, versions } = await r;
 		// what flowR does not know, an installed R may
-		const installed = rExports(opts.rscript, missing.map(w => w.pkg));
 		for(const w of missing) {
 			if(!found.get(w.pkg)?.fns.length && installed.has(w.pkg)) {
 				found.set(w.pkg, installed.get(w.pkg));
 			}
 		}
-		const topics = helpTopics(opts.rscript, missing.map(w => w.pkg));
-		const versions = rVersions(opts.rscript, missing.map(w => w.pkg));
 		const shipped = shippedPages();
 		for(const w of missing) {
 			const s = found.get(w.pkg), help = topics.get(w.pkg);
@@ -2557,7 +3237,7 @@ export async function packageEntries(backend, wanted, opts, dir) {
 			const data = [...installed.get(w.pkg)?.data ?? [], ...help?.data ?? []];
 			const text = packageEntry(w.pkg, versions.get(w.pkg) ?? s?.version ?? 'unknown', withHelp(fns, help), generics, data);
 			entries.set(w.pkg, text);
-			const f = file({ ...w, version: s.version });
+			const f = file(w);
 			if(f) {
 				fs.mkdirSync(path.dirname(f), { recursive: true });
 				fs.writeFileSync(f + '.part', text + '\n');
@@ -2571,7 +3251,18 @@ export async function packageEntries(backend, wanted, opts, dir) {
 export async function documentText(backend, code, opts, dir) {
 	const { blocks, requests } = parseCode(code);
 	const web = backend instanceof Web;
-	const { entries, skipped, units = [] } = web || blocks.length === 0 ? detectByScan(blocks) : detectWithFlowr(backend, blocks, dir);
+	let todo;
+	try {
+		todo = web ? [] : planRequests(requests, blocks, dir);
+	} catch{ /* they fail below, with a message */ }
+	const along = todo?.filter(t => !t.r.instance && satisfiesSafe(backend, `>=${MIN_VERSIONS[t.r.kind] ?? '0'}`)) ?? [];
+	const cache = web ? NO_CACHE : AnswerCache.for(backend, opts);
+	const plan = web ? undefined : requestPlan(backend, along, dir, cache);
+	const { entries, skipped, units = [], more } = web || blocks.length === 0 ? detectByScan(blocks)
+		: detectWithFlowr(backend, blocks, dir, plan.cmds, cache);
+	if(plan && more) {
+		plan.finish(more);
+	}
 	const wanted = new Map();
 	for(const e of entries) {
 		const w = wanted.get(e.pkg) ?? wanted.set(e.pkg, { pkg: e.pkg }).get(e.pkg);
@@ -2580,13 +3271,16 @@ export async function documentText(backend, code, opts, dir) {
 	}
 	const pkgs = await packageEntries(backend, [...wanted.values()], opts, dir);
 	const ops = operators([...pkgs.values()]);
+	const marked = new Set(blocks.filter(b => b.dependencies).map(b => b.id));
 	let answered = [];
 	if(requests.length) {
 		try {
 			if(web) {
 				throw new Error('the web backend answers no queries');
 			}
-			answered = [...requestTexts(backend, requests, blocks, dir, opts), ...sessionTexts(backend, requests, dir)];
+			const early = plan?.got ?? new Map();
+			answered = [...requestTexts(backend, requests, blocks, dir, opts, todo ?? planRequests(requests, blocks, dir), early),
+				...sessionTexts(backend, requests, dir)];
 		} catch(e) {
 			answered = [`\\mrFlowrRequestsFailed{${texMessage(e.message)}}`];
 		}
@@ -2601,7 +3295,7 @@ export async function documentText(backend, code, opts, dir) {
 		...entries.filter(e => e.attach && e.at).map(e => `\\mrLoad{${e.at[0]}}{${e.at[1]}}{${e.pkg}}`),
 		...units.length ? [`\\mrFlowBlocks{${units.flatMap(u => u.ids).join(',')}}`] : [],
 		...units.flatMap(flowFacts),
-		...units.flatMap(dependencyLines),
+		...units.flatMap(dependencyLines).filter(l => marked.has(/^\\mrFlowLine\{(.*)@\d+\}/.exec(l)[1])),
 		...answered
 	].join('\n') + '\n';
 }
@@ -2814,6 +3508,17 @@ export async function verifyCommand(opts, [file]) {
 	}
 }
 
+export function installCommand(opts, [version]) {
+	const v = exactVersion(version);
+	const cache = cacheDir({ ...opts, noCache: false });
+	if(!v || !cache) {
+		throw new Error('usage: magic-r-flowr.mjs install [--cache <dir>] <version, e.g. 2.15.10>');
+	}
+	const cli = npmInstalled(cache, v) ?? installFlowr(cache, v, opts.timeout);
+	const repl = new Repl('node', [process.execPath, cli], { timeout: opts.timeout, engine: opts.engine });
+	console.error(`flowR ${repl.version()} is in ${path.dirname(path.dirname(cli))}`);
+}
+
 export function parseArgs(argv) {
 	const opts = {}, rest = [];
 	const keys = { '--flowr': 'flowr', '--rscript': 'rscript', '--cache': 'cache', '--timeout': 'timeout', '-o': 'output', '--backend': 'backend', '--image': 'image', '--require-version': 'requireVersion', '--engine': 'engine' };
@@ -2822,6 +3527,8 @@ export function parseArgs(argv) {
 			opts.noCache = true;
 		} else if(argv[i] === '--no-cleanup') {
 			opts.cleanup = false;
+		} else if(argv[i] === '--no-install') {
+			opts.install = false;
 		} else if(argv[i] === '--prune') {
 			opts.prune = true;
 		} else if(keys[argv[i]]) {
@@ -2841,7 +3548,7 @@ export function parseArgs(argv) {
 async function main() {
 	const [cmd, ...args] = process.argv.slice(2);
 	const { opts, rest } = parseArgs(args);
-	const commands = { document: documentCommand, generate: generateCommand, verify: verifyCommand };
+	const commands = { document: documentCommand, generate: generateCommand, verify: verifyCommand, install: installCommand };
 	if(commands[cmd]) {
 		return commands[cmd](opts, rest);
 	}
