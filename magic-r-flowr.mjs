@@ -612,25 +612,36 @@ export function slim(answer) {
 		...answer['call-graph']?.graph ? { 'call-graph': { ...answer['call-graph'], graph: strip(answer['call-graph'].graph) } } : {} };
 }
 
-/** the cache key of a command: the command without its file's place, and the code in that file */
-export function commandKey(repl, cache, cmd, dir) {
-	if(!cache.enabled || typeof repl.file !== 'function') {
+/** what a command asks: the command without its file's place, and the code in that file */
+function commandContent(repl, cmd, dir) {
+	if(typeof repl.file !== 'function') {
 		return undefined;
 	}
 	const probe = repl.file(dir, '\0'), base = `file://${probe.slice(0, -1)}`;
 	const at = cmd.indexOf(base);
 	try {
-		return at < 0 ? undefined : cache.key('command', cmd.slice(0, at), fs.readFileSync(path.join(dir, cmd.slice(at + base.length)), 'utf8'));
+		return at < 0 ? undefined : ['command', cmd.slice(0, at), fs.readFileSync(path.join(dir, cmd.slice(at + base.length)), 'utf8')];
 	} catch{
 		return undefined;
 	}
 }
 
-/** runs the commands not in the cache, with `extra` (not cached) in the same start: { answers, more } */
+/** the cache key of a command: the command without its file's place, and the code in that file */
+export function commandKey(repl, cache, cmd, dir) {
+	const content = cache.enabled ? commandContent(repl, cmd, dir) : undefined;
+	return content && cache.key(...content);
+}
+
+/**
+ * runs the commands not in the cache, with `extra` (not cached) in the same start: { answers, more };
+ * commands that ask the same of the same code (the overlays of a beamer frame) run once
+ */
 export function execCached(repl, cmds, dir, cache = NO_CACHE, extra = []) {
 	const keys = cmds.map(c => commandKey(repl, cache, c, dir));
 	const answers = keys.map(k => cache.get(k));
-	const miss = cmds.map((_, i) => i).filter(i => answers[i] === undefined);
+	const same = cmds.map(c => JSON.stringify(commandContent(repl, c, dir) ?? c));
+	const first = new Map();
+	const miss = cmds.map((_, i) => i).filter(i => answers[i] === undefined && !first.has(same[i]) && first.set(same[i], i));
 	if(miss.length === 0 && extra.length === 0) {
 		return { answers, more: [] };
 	}
@@ -641,6 +652,9 @@ export function execCached(repl, cmds, dir, cache = NO_CACHE, extra = []) {
 		if(!answerError(got[j])) {
 			cache.set(keys[i], slim(got[j]));
 		}
+	});
+	answers.forEach((a, i) => {
+		answers[i] = a ?? answers[first.get(same[i])];
 	});
 	return { answers, more: got.slice(miss.length) };
 }
@@ -2674,18 +2688,25 @@ export function memberAnswer(b, m, a) {
 
 /** cached answers (got) and the commands for the rest (cmds); `finish` keeps their answers, returns what failed */
 export function requestPlan(flowr, todo, dir, cache = NO_CACHE) {
-	const got = new Map(), keys = new Map(), misses = [];
+	// twins: the first request by what it asks of which code, copies: [request, its twin] (beamer overlays)
+	const got = new Map(), keys = new Map(), misses = [], twins = new Map(), copies = [];
 	for(const t of todo) {
-		let key;
+		let content;
 		try {
-			key = cache.enabled ? cache.key('request', requestQuery(t, flowr), fs.readFileSync(path.join(dir, t.file), 'utf8')) : undefined;
+			content = [requestQuery(t, flowr), fs.readFileSync(path.join(dir, t.file), 'utf8')];
 		} catch{ /* no file */ }
-		const hit = cache.get(key);
-		if(hit === undefined) {
+		const key = content && cache.enabled ? cache.key('request', ...content) : undefined;
+		const hit = cache.get(key), same = content && JSON.stringify(content);
+		if(hit !== undefined) {
+			got.set(t, hit);
+		} else if(twins.has(same)) {
+			copies.push([t, twins.get(same)]);
+		} else {
+			if(same) {
+				twins.set(same, t);
+			}
 			keys.set(t, key);
 			misses.push(t);
-		} else {
-			got.set(t, hit);
 		}
 	}
 	const batches = batchRequests(flowr, misses, dir);
@@ -2705,6 +2726,7 @@ export function requestPlan(flowr, todo, dir, cache = NO_CACHE) {
 		},
 		keep(t, a) {
 			got.set(t, a);
+			copies.forEach(([c, of]) => of === t && got.set(c, a));
 			if(!answerError(a)) {
 				cache.set(keys.get(t), t.r.kind === 'query' || !a ? a : slim(a));
 			}

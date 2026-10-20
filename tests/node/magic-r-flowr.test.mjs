@@ -1306,3 +1306,25 @@ test('files a listing sources (mrsource): analyzed before it, not shown, and fir
 		edgeInformation: [[0, [[1, { types: 2 }]]], [2, [[0, { types: 1 }], [1, { types: 4 }]]]] } } };
 	assert.deepEqual(m.flowFacts({ answer, at: l => l === 2 ? ['1', 1] : undefined, source: l => lines[l - 1], sourced: l => l === 1 }), ['\\mrFlowFile{1@1@1}{fun}']);
 });
+
+test('the same code asked the same twice in one run (beamer overlays) runs once', () => {
+	const runs = [];
+	const repl = { file: (dir, f) => path.join(dir, f), query: (q, d, f) => `:query* ${JSON.stringify(q)} file://${path.join(d, f)}`,
+		exec(cmds) {
+			runs.push(cmds.length);
+			return cmds.map((_, i) => ({ n: i }));
+		} };
+	const dir = tmp();
+	fs.writeFileSync(path.join(dir, 'a.R'), 'x\n');
+	fs.writeFileSync(path.join(dir, 'b.R'), 'x\n');
+	fs.writeFileSync(path.join(dir, 'c.R'), 'y\n');
+	const cmds = ['a.R', 'b.R', 'c.R'].map(f => repl.query([{ type: 'dataflow' }], dir, f));
+	assert.deepEqual(m.execCached(repl, cmds, dir).answers, [{ n: 0 }, { n: 0 }, { n: 1 }]);
+	assert.deepEqual(runs, [2]);
+	const todo = m.planRequests([{ kind: 'slice', name: 's', block: '1', criterion: '1@x' }, { kind: 'slice', name: 't', block: '2', criterion: '1@x' }],
+		[{ id: '1', lines: ['x <- 1'] }, { id: '2', lines: ['x <- 1'] }], dir);
+	const plan = m.requestPlan(repl, todo, dir);
+	assert.equal(plan.cmds.length, 1);
+	plan.keep(todo[0], { slice: 1 });
+	assert.deepEqual(plan.got.get(todo[1]), { slice: 1 });
+});
