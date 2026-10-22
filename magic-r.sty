@@ -2125,9 +2125,11 @@
       {
         \iow_close:N \g__mr_code_iow
         \__mr_side_close:
+        \bool_if:NT \g__mr_session_play_open_bool { \iow_close:N \g__mr_session_play_iow }
         % the answer is stale if the code, the options, or the helper itself changed
         \str_set:Ne \l__mr_md_str { \file_mdfive_hash:n { \c__mr_code_str } \file_mdfive_hash:n { \g__mr_script_str }
           \file_mdfive_hash:n { \c_sys_jobname_str .mr-play.R } \file_mdfive_hash:n { \c_sys_jobname_str .mr-slice.R }
+          \file_mdfive_hash:n { \c_sys_jobname_str .mr-sessions.R }
           \tl_to_str:N \g__mr_helper_opts_tl }
         \file_if_exist:nF { \c__mr_answer_str } { \str_gclear:N \g__mr_flowr_md_str }
         \str_if_eq:VVF \l__mr_md_str \g__mr_flowr_md_str
@@ -2425,17 +2427,63 @@
 \tl_new:N \l__mr_listing_tl
 \bool_new:N \l__mr_animate_bool
 \int_new:N \l__mr_start_int
+\bool_new:N \l__mr_session_play_bool
 \keys_define:nn { magic-r / session }
   {
     animate .bool_set:N = \l__mr_animate_bool ,
     start   .int_set:N  = \l__mr_start_int ,
     listing .tl_set:N   = \l__mr_listing_tl ,
+    play    .bool_set:N = \l__mr_session_play_bool ,
+    play    .default:n  = true ,
+  }
+% the key play (default: the option playground): the inputs of the session, a script without the
+% outputs, get a link into flowR's playground (\mrSessionPlayUrl). The inputs of every session go to a
+% side file of their own (\jobname.mr-sessions.R), as part 's<md5 of the inputs>'
+\iow_new:N \g__mr_session_play_iow
+\bool_new:N \g__mr_session_play_open_bool
+\seq_new:N \g__mr_session_play_seq
+\tl_new:N \l__mr_session_part_tl
+\cs_new_protected:Npn \__mr_session_play:
+  {
+    \tl_set:Ne \l__mr_session_part_tl { \exp_args:NV \str_mdfive_hash:n \l__mr_ctx_str }
+    \tl_set:Ne \l__mr_session_part_tl { s \str_range:Nnn \l__mr_session_part_tl { 1 } { 12 } }
+    \bool_if:NF \g__mr_session_play_open_bool
+      {
+        \iow_open:Nn \g__mr_session_play_iow { \c_sys_jobname_str .mr-sessions.R }
+        \bool_gset_true:N \g__mr_session_play_open_bool
+      }
+    % beamer typesets a frame once per overlay: the part and its request once
+    \seq_if_in:NVF \g__mr_session_play_seq \l__mr_session_part_tl
+      {
+        \seq_gput_right:NV \g__mr_session_play_seq \l__mr_session_part_tl
+        \iow_now:Ne \g__mr_session_play_iow
+          { \c_hash_str \c_hash_str \c_space_tl magic-r~part~ \l__mr_session_part_tl }
+        \seq_map_inline:Nn \l__mr_lines_seq { \iow_now:Ne \g__mr_session_play_iow {##1} }
+        \__mr_request:nnnn { playground } { pg- \l__mr_session_part_tl } { }
+          { , ~ "file":" \c_sys_jobname_str .mr-sessions.R", ~ "part":" \l__mr_session_part_tl " }
+      }
+  }
+% \mrSessionPlayUrl: while a session is typeset, the link of its inputs into flowR's playground (empty
+% without one), for a document that draws a button of its own; it is global, so a hook of listings sees it
+\tl_new:N \mrSessionPlayUrl
+\cs_new_protected:Npn \__mr_session_url:
+  {
+    \tl_gclear:N \mrSessionPlayUrl
+    \bool_if:NT \l__mr_session_play_bool
+      {
+        \cs_if_exist:cT { mr@pg@pg- \l__mr_session_part_tl }
+          {
+            \tl_gset:Ne \mrSessionPlayUrl
+              { \mrPlaygroundUrl \mr@hashchar \use:c { mr@pg@pg- \l__mr_session_part_tl } }
+          }
+      }
   }
 \cs_new_protected:Npn \__mr_session:nn #1#2
   {
     \group_begin:
     \bool_set:Nn \l__mr_animate_bool { \cs_if_exist_p:c { ver@beamer.cls } }
     \int_set:Nn \l__mr_start_int { 1 }
+    \bool_set:Nn \l__mr_session_play_bool { \legacy_if_p:n { mr@playground } }
     \keys_set:nn { magic-r / session } {#1}
     \int_gincr:N \g__mr_session_int
     \seq_clear:N \l__mr_lines_seq
@@ -2449,6 +2497,7 @@
     \str_gset:Ne \g__mr_r_ctx_str { \g__mr_r_ctx_str | \exp_args:NV \str_mdfive_hash:n \l__mr_ctx_str }
     \exp_args:NV \__mr_r_query:nn \l__mr_ctx_str { session }
     \str_gset_eq:NN \g__mr_r_ctx_str \l__mr_tmp_str
+    \bool_if:NT \l__mr_session_play_bool { \__mr_session_play: }
     % the steps: the lines of R up to each '@@step@@'
     \seq_clear:N \l__mr_steps_seq
     \tl_clear:N \l__mr_step_tl
@@ -2493,6 +2542,7 @@
   }
 \cs_new_protected:Npn \__mr_session_typeset:
   {
+    \__mr_session_url:
     \use:e
       {
         \exp_not:N \mr@r@input { lRConsole }

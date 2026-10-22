@@ -457,6 +457,18 @@ export class Repl {
 		if(cmds.some(c => c.includes(';'))) {
 			throw new Error('a flowR command must not contain ";"');
 		}
+		try {
+			return this.execBatch(cmds, dir);
+		} catch(e) {
+			// the answers of a large document exceed what node holds in one string: halve the batch
+			if(cmds.length > 1 && (e instanceof RangeError || /string longer than|ERR_STRING_TOO_LONG|ENOBUFS/.test(e?.message ?? ''))) {
+				const half = Math.ceil(cmds.length / 2);
+				return [...this.exec(cmds.slice(0, half), dir), ...this.exec(cmds.slice(half), dir)];
+			}
+			throw e;
+		}
+	}
+	execBatch(cmds, dir) {
 		const all = [':version', ...cmds.flatMap(c => [c, ':version'])];
 		const res = run(this.command(all, dir), { cwd: this.home(dir), timeout: this.timeout, toFile: true, env: this.env() });
 		const { answers: list, parts } = separatedAnswers(res.stdout ?? '', cmds.length);
