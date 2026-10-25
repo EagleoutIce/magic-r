@@ -845,6 +845,11 @@ The environment \env[r]{rsession} runs its lines like R's console (an input may 
 environment of its own, and shows prompts that do not copy. Names defined in a session link to
 their definition within it. On beamer slides, the inputs appear one after the other (keys
 \key[r]{animate}, \key[r]{start}, \key[r]{listing}, and \cmd[r]{mrSessionSetup} sets them for all sessions).
+With the option \TT{playground} (key \TT{play}), a session links into flowR's playground with its
+transcript as \TT{session.Rout}, after the part of \cmd[r]{mrRSetup} it needs (the packages whose names
+it uses and the definitions it reads, formatted over lines): the playground runs the inputs and
+marks output that differs from what the document shows. Escapes (\TT{!*...*!}) and marks such as \TT{|dim|...|dim|} work in the
+inputs as in a listing; R and the playground do not see them.
 \begin{latex}
 \begin{rsession}
 x <- c(4, 8, 15, 16, 23, 42)

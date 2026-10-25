@@ -2148,14 +2148,15 @@ export function criterion(c, lines) {
 
 /**
  * The part after '#' of a link into flowR's playground: the code (base64url), marks (lines '3',
- * criteria '5@x', findings 'lint:rule'), the cursor ('3:5'), and other files ({ name, lines }, 2.16)
+ * criteria '5@x', findings 'lint:rule'), the cursor ('3:5'), other files ({ name, lines }, 2.16), and the
+ * name of the code's file ('session.Rout' opens an R console transcript, which the playground runs)
  */
-export function playgroundHash(lines, marks = [], at, files = []) {
+export function playgroundHash(lines, marks = [], at, files = [], name) {
 	const enc = s => s.replace(/[^A-Za-z0-9\-._~!$'()*,;:@/?=]/gu, c => encodeURIComponent(c));
 	const text = ls => ls.slice(0, ls.findLastIndex(l => l.trim()) + 1).join('\n');
 	const pack = t => `t${Buffer.from(t).toString('base64url')}`;
 	return [`c=${pack(text(lines))}`, files.length ? `o=${pack(JSON.stringify(files.map(f => [f.name, text(f.lines)])))}` : '',
-		marks.length ? `h=${enc(marks.join(','))}` : '', at ? `p=${at}` : ''].filter(Boolean).join('&');
+		marks.length ? `h=${enc(marks.join(','))}` : '', at ? `p=${at}` : '', name ? `n=${enc(name)}` : ''].filter(Boolean).join('&');
 }
 
 /**
@@ -2302,7 +2303,8 @@ export function playgroundTexts(code) {
 		const shifted = marks.map(c => c.replace(/^\d+/, n => String(Number(n) + pre.length)));
 		// the cursor on the first criterion: the page opens on its slice
 		const at = shifted.map(c => place(c, [...pre, ...lines])).find(Boolean);
-		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...pre, ...lines], shifted, at?.join(':'), files)}}`];
+		return [`\\mrFlowrPlayground{${r.name}}{${playgroundHash([...pre, ...lines], shifted, at?.join(':'), files,
+			/^[\w.-]+$/.test(String(r.main ?? '')) ? String(r.main) : undefined)}}`];
 	});
 }
 

@@ -620,6 +620,19 @@ test('links into flowR\'s playground carry the code, marks, and a cursor', () =>
 	assert.deepEqual(m.playgroundTexts(code.replace('"block":"3"', '"block":"9"')), []);
 });
 
+test('a session opens in the playground as its transcript, named session.Rout', () => {
+	const lines = ['> f <- function(v)', '+   v * 2', '> f(1:3)', '[1] 2 4 6'];
+	const params = new URLSearchParams(m.playgroundHash(lines, [], undefined, [], 'session.Rout'));
+	assert.equal(params.get('n'), 'session.Rout');
+	assert.equal(Buffer.from(params.get('c').slice(1), 'base64url').toString('utf8'), lines.join('\n'));
+	assert.equal(new URLSearchParams(m.playgroundHash(lines)).get('n'), null);
+	const code = ['## magic-r block 3', ...lines,
+		'## magic-r request {"kind":"playground","name":"pg-3","block":"3","main":"session.Rout"}'].join('\n');
+	assert.deepEqual(m.playgroundTexts(code), [`\\mrFlowrPlayground{pg-3}{${m.playgroundHash(lines, [], undefined, [], 'session.Rout')}}`]);
+	// a name that is no plain file name is left out
+	assert.doesNotMatch(m.playgroundTexts(code.replace('session.Rout"', 'a b"'))[0], /n=/);
+});
+
 test('the playground gets the code with its indentation from its part of the file of the document', () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'magic-r-play-'));
 	const cwd = process.cwd();
