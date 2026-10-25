@@ -2173,7 +2173,7 @@
 .mr$q <- function(marker, ctx, file, mode, lines) { writeLines(c("", paste0("@@mr:", marker, "@@"))); e <- .mr$env(ctx, file);
   t0 <- proc.time()[[3]]; err <- FALSE;
   if (mode == "session") { buf <- character(); for (l in lines) { if (!length(buf) && !nzchar(trimws(l))) next; buf <- c(buf, l);
-    p <- tryCatch(parse(text = buf, keep.source = FALSE), error = function(c) if (grepl("end of input", conditionMessage(c))) NULL else c);
+    p <- tryCatch(parse(text = gsub("![*].*?[*]!|[|](dim|warn|err|info|plain)[|]", "", buf, perl = TRUE), keep.source = FALSE), error = function(c) if (grepl("end of input", conditionMessage(c))) NULL else c);
     if (is.null(p)) next; .mr$prompts(buf); buf <- character();
     if (inherits(p, "error")) { err <- TRUE; writeLines(paste0(":out:Error: ", .mr$one(conditionMessage(p)))) } else for (x in p) err <- .mr$run(x, e, "print", ":out:") || err;
     writeLines("@@step@@") };
@@ -2543,6 +2543,11 @@
 \cs_new_protected:Npn \__mr_session_typeset:
   {
     \__mr_session_url:
+    % the inputs were read with \dospecials as other: escapes to LaTeX need the usual catcodes
+    \char_set_catcode_escape:N \\ \char_set_catcode_group_begin:N \{ \char_set_catcode_group_end:N \}
+    \char_set_catcode_math_toggle:N \$ \char_set_catcode_alignment:N \& \char_set_catcode_parameter:N \#
+    \char_set_catcode_math_superscript:N \^ \char_set_catcode_math_subscript:N \_
+    \char_set_catcode_comment:N \% \char_set_catcode_active:N \~
     \use:e
       {
         \exp_not:N \mr@r@input { lRConsole }
