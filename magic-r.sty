@@ -171,7 +171,11 @@
 
 % \mr@path lists the attached packages, the last one attached first, as R does
 \def\mr@path{}
-\def\mr@attach#1{\mr@load{#1}\mr@detach{#1}\xdef\mr@path{{\detokenize{#1}}\unexpanded\expandafter{\mr@path}}}
+\def\mr@attach#1{\mr@load{#1}\mr@detach{#1}\xdef\mr@path{{\detokenize{#1}}\unexpanded\expandafter{\mr@path}}%
+  \ifcsname mr@meta@#1\endcsname\expandafter\expandafter\expandafter\mrAttach\expandafter\expandafter\expandafter{\csname mr@meta@#1\endcsname}\fi}
+% \mrMetaPackage{pkg}{a,b,...}: attaching pkg attaches a, b, ... as well, as 'library(tidyverse)' does in R
+\newcommand*\mrMetaPackage[2]{\csgdef{mr@meta@#1}{#2}}
+\mrMetaPackage{tidyverse}{lubridate,forcats,stringr,purrr,tidyr,tibble,ggplot2,readr,dplyr}
 \def\mr@detach#1{\def\mr@t{}\edef\mr@w{\detokenize{#1}}%
   \expandafter\mr@detach@\mr@path\@nil\global\let\mr@path\mr@t}
 \def\mr@detach@#1{\ifx\@nil#1\else\def\mr@n{#1}\ifx\mr@n\mr@w\else
